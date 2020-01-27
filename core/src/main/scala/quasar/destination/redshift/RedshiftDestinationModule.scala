@@ -31,22 +31,30 @@ import argonaut._, Argonaut._
 
 import cats.effect.{ConcurrentEffect, Concurrent, ContextShift, Resource, Sync, Timer}
 import cats.data.EitherT
+import cats.implicits._
 
+import doobie.Transactor
+import doobie.free.connection.isValid
 import doobie.hikari.HikariTransactor
+import doobie.implicits._
 
 import eu.timepit.refined.auto._
 
 import java.util.concurrent.Executors
 
+import scalaz.NonEmptyList
+
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.regions.{Region => AwsRegion}
 import software.amazon.awssdk.services.s3.S3AsyncClient
+
 
 object RedshiftDestinationModule extends DestinationModule {
   val RedshiftDriverFqcn = "com.amazon.redshift.jdbc.Driver"
   val Redacted = "<REDACTED>"
   val PoolSize = 10
   val PartSize = 10 * 1024 * 1024
+  val LivenessTimeout = 60
 
   def destinationType = DestinationType("redshift", 1L)
 
@@ -89,12 +97,25 @@ object RedshiftDestinationModule extends DestinationModule {
       client <- EitherT.right[InitializationError[Json]][Resource[F, ?], S3AsyncClient](
         s3Client[F](uploadCfg.accessKey, uploadCfg.secretKey, uploadCfg.region))
 
+      _ <- EitherT(Resource.liftF(validConnection(xa, config)))
+
       deleteService = S3DeleteService(client, uploadCfg.bucket)
+
       putService = S3PutService(client, PartSize, uploadCfg.bucket)
 
       dest: Destination[F] = new RedshiftDestination[F](deleteService, putService, cfg, xa)
 
     } yield dest).value
+
+  private def validConnection[F[_]: Sync](xa: Transactor[F], config: Json)
+      : F[Either[InitializationError[Json], Unit]] =
+    isValid(LivenessTimeout).transact(xa).map(valid =>
+      if (valid)
+        ().asRight
+      else
+        DestinationError
+          .invalidConfiguration((destinationType, config, NonEmptyList("Couldn't connect to Redshift")))
+          .asLeft)
 
   private def boundedPool[F[_]: Sync](name: String, threadCount: Int): Resource[F, ExecutionContext] =
     Resource.make(
