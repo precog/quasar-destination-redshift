@@ -23,7 +23,7 @@ import quasar.api.destination.{Destination, DestinationType, ResultSink}
 import quasar.api.push.RenderConfig
 import quasar.api.resource._
 import quasar.api.table.{ColumnType, TableColumn, TableName}
-import quasar.blobstore.paths.{BlobPath, PathElem}
+import quasar.blobstore.paths.{BlobPath, PathElem, PrefixPath}
 import quasar.blobstore.services.{DeleteService, PutService}
 import quasar.blobstore.s3.Bucket
 import quasar.connector.{MonadResourceErr, ResourceError}
@@ -69,27 +69,30 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
         suffix <- Sync[F].delay(UUID.randomUUID().toString)
 
-        freshName = s"reform-$suffix.gz"
+        prefix = s"reform-$suffix"
+        freshName = s"$prefix/0.gz"
 
         uploadPath = BlobPath(List(PathElem(freshName)))
 
         _ <- put((uploadPath, compressed))
 
+        dropQuery = dropTableQuery(tableName).update
+
         createQuery = createTableQuery(tableName, cols).update
-
-        _ <- debug(s"Create table query: ${createQuery.sql}")
-
-        _ <- createQuery.run.transact(xa)
 
         copyQuery = copyTableQuery(
           tableName,
           config.uploadBucket.bucket,
-          uploadPath,
+          PrefixPath(List(PathElem(prefix))),
           config.authorization).update
+
+        _ <- debug(s"Drop table query: ${dropQuery.sql}")
+
+        _ <- debug(s"Create table query: ${createQuery.sql}")
 
         _ <- debug(s"Copy table query: ${copyQuery.sql}")
 
-        _ <- copyQuery.run.transact(xa)
+        _ <- (dropQuery.run *> createQuery.run *> copyQuery.run).transact(xa)
 
       } yield ()
     })
@@ -111,27 +114,39 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
   private def copyTableQuery(
     tableName: TableName,
     bucket: Bucket,
-    blob: BlobPath,
+    blob: PrefixPath,
     auth: Authorization)
       : Fragment =
-    fr"COPY" ++ Fragment.const(tableName.name) ++ fr"FROM" ++ s3PathFragment(bucket, blob) ++ authFragment(auth)
+    fr"COPY" ++
+       Fragment.const(tableName.name) ++
+       fr"FROM" ++
+       s3PathFragment(bucket, blob) ++
+       authFragment(auth) ++
+       fr"CSV" ++
+       fr"GZIP" ++
+       fr"IGNOREHEADER 1" ++
+       fr"TIMEFORMAT 'auto'" ++
+       fr"EMPTYASNULL"
 
-  private def s3PathFragment(bucket: Bucket, blob: BlobPath): Fragment = {
-    val path = blob.path.map(_.value).intercalate("/")
+  private def s3PathFragment(bucket: Bucket, prefix: PrefixPath): Fragment = {
+    val path = prefix.path.map(_.value).intercalate("/")
 
-    fr"'s3://${bucket.value}/$path'"
+    Fragment.const(s"'s3://${bucket.value}/$path/'")
   }
 
   private def authFragment(auth: Authorization): Fragment = auth match {
     case Authorization.RoleARN(arn) =>
-      fr"iam_role '$arn'"
+      Fragment.const(s"iam_role '$arn'")
     case Authorization.Keys(accessKey, secretKey) =>
-      fr"access_key_id '${accessKey.value}'" ++ fr"secret_access_key '${secretKey.value}'"
+      Fragment.const(s"access_key_id '${accessKey.value}' secret_access_key '${secretKey.value}'")
   }
 
   private def createTableQuery(tableName: TableName, columns: NonEmptyList[Fragment]): Fragment =
     fr"CREATE TABLE" ++ Fragment.const(tableName.name) ++
       Fragments.parentheses(columns.intercalate(fr","))
+
+  private def dropTableQuery(tableName: TableName): Fragment =
+    fr"DROP TABLE IF EXISTS" ++ Fragment.const(tableName.name)
 
   private def mkErrorString(errs: NonEmptyList[ColumnType.Scalar]): String =
     errs
@@ -139,21 +154,21 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
       .intercalate(", ")
 
   private def mkColumn(c: TableColumn): ValidatedNel[ColumnType.Scalar, Fragment] =
-    columnTypeToRedshift(c.tpe).map(Fragment.const(c.name) ++ _)
+    columnTypeToRedshift(c.tpe).map(Fragment.const(s"${c.name}") ++ _)
 
   private def columnTypeToRedshift(ct: ColumnType.Scalar)
       : ValidatedNel[ColumnType.Scalar, Fragment] =
     ct match {
       case ColumnType.Null => fr0"SMALLINT".validNel
       case ColumnType.Boolean => fr0"BOOLEAN".validNel
-      case lt @ ColumnType.LocalTime => lt.invalidNel
-      case ot @ ColumnType.OffsetTime => ot.invalidNel
+      case lt @ ColumnType.LocalTime => "TIMESTAMP".invalidNel
+      case ot @ ColumnType.OffsetTime => "TIMESTAMPTZ".invalidNel
       case ColumnType.LocalDate => fr0"DATE".validNel
       case od @ ColumnType.OffsetDate => od.invalidNel
       case ColumnType.LocalDateTime => fr0"TIMESTAMP".validNel
       case ColumnType.OffsetDateTime => fr0"TIMESTAMPTZ".validNel
       case i @ ColumnType.Interval => i.invalidNel
-      case ColumnType.Number => fr0"FLOAT".validNel
+      case ColumnType.Number => fr0"DECIMAL".validNel
       case ColumnType.String => fr0"TEXT".validNel
     }
 

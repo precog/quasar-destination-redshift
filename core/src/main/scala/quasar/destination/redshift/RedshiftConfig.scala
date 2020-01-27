@@ -78,16 +78,16 @@ object RedshiftConfig {
     CodecJson[Authorization]({
       case Authorization.RoleARN(arn) =>
         Json.obj(
-          "auth" := "role",
+          "type" := "role",
           "arn" := arn)
       case Authorization.Keys(accessKey, secretKey) =>
         Json.obj(
-          "auth" := "keys",
+          "type" := "keys",
           "accessKey" := accessKey.value,
           "secretKey" := secretKey.value)
     }, (c => for {
-      auth <- c.get[String]("auth")
-      res <- auth match {
+      authType <- c.get[String]("type")
+      res <- authType match {
         case "role" =>
           c.get[String]("arn").map(Authorization.RoleARN(_))
         case "keys" =>

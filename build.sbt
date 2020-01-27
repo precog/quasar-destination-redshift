@@ -46,6 +46,7 @@ lazy val core = project
       "com.slamdata" %% "async-blobstore-s3" % AsyncBlobstoreVersion,
       "com.slamdata" %% "fs2-gzip" % "1.1.1",
       "com.amazon.redshift" % "redshift-jdbc4-no-awssdk" % "1.2.10.1009"),
+    quasarPluginExtraResolvers := Seq(coursier.MavenRepository("https://s3.amazonaws.com/redshift-maven-repository/release")),
     performMavenCentralSync := false,
     publishAsOSSProject := false,
     libraryDependencies ++= Seq(
