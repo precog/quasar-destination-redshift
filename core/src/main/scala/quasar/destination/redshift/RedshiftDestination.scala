@@ -21,10 +21,12 @@ import scala.Predef._
 
 import quasar.api.destination.{Destination, DestinationType, ResultSink}
 import quasar.api.push.RenderConfig
+import quasar.api.resource._
 import quasar.api.table.{ColumnType, TableColumn, TableName}
 import quasar.blobstore.paths.{BlobPath, PathElem}
-import quasar.blobstore.services.PutService
-import quasar.connector.MonadResourceErr
+import quasar.blobstore.services.{DeleteService, PutService}
+import quasar.blobstore.s3.Bucket
+import quasar.connector.{MonadResourceErr, ResourceError}
 
 import cats.data.ValidatedNel
 import cats.effect.{ConcurrentEffect, ContextShift, Sync, Timer}
@@ -46,6 +48,7 @@ import scalaz.NonEmptyList
 import shims._
 
 final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
+  deleteService: DeleteService[F],
   put: PutService[F],
   config: RedshiftConfig,
   xa: Transactor[F]) extends Destination[F] with Logging {
@@ -58,23 +61,39 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
   private val csvSink: ResultSink[F] = ResultSink.csv[F](RenderConfig.Csv()) {
     case (path, columns, bytes) => Stream.eval({
       for {
-        suffix <- Sync[F].delay(UUID.randomUUID().toString)
-        freshName = s"reform-$suffix.gz"
+        cols <- Sync[F].fromEither(ensureValidColumns(columns).leftMap(new RuntimeException(_)))
+
+        tableName <- ensureValidTableName(path)
+
         compressed = bytes.through(gzip.compress(1024))
+
+        suffix <- Sync[F].delay(UUID.randomUUID().toString)
+
+        freshName = s"reform-$suffix.gz"
+
         uploadPath = BlobPath(List(PathElem(freshName)))
+
         _ <- put((uploadPath, compressed))
+
+        createQuery = createTableQuery(tableName, cols).update
+
+        _ <- debug(s"Create table query: ${createQuery.sql}")
+
+        _ <- createQuery.run.transact(xa)
+
+        copyQuery = copyTableQuery(
+          tableName,
+          config.uploadBucket.bucket,
+          uploadPath,
+          config.authorization).update
+
+        _ <- debug(s"Copy table query: ${copyQuery.sql}")
+
+        _ <- copyQuery.run.transact(xa)
+
       } yield ()
     })
   }
-
-  private def createTableQuery(tableName: TableName, columns: NonEmptyList[Fragment]): Fragment =
-    fr"CREATE TABLE" ++ Fragment.const(tableName.name) ++
-      Fragments.parentheses(columns.intercalate(fr",")) ++ fr"with nopartition"
-
-  private def mkErrorString(errs: NonEmptyList[ColumnType.Scalar]): String =
-    errs
-      .map(err => s"Column of type ${err.show} is not supported by Redshift")
-      .intercalate(", ")
 
   private def ensureValidColumns(columns: List[TableColumn]): Either[String, NonEmptyList[Fragment]] =
     for {
@@ -82,6 +101,42 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
       cols <- cols0.traverse(mkColumn(_)).toEither.leftMap(errs =>
         s"Some column types are not supported: ${mkErrorString(errs.asScalaz)}")
     } yield cols.asScalaz
+
+  private def ensureValidTableName(r: ResourcePath): F[TableName] =
+    r match {
+      case file /: ResourcePath.Root => TableName(file).pure[F]
+      case _ => MonadResourceErr[F].raiseError(ResourceError.notAResource(r))
+    }
+
+  private def copyTableQuery(
+    tableName: TableName,
+    bucket: Bucket,
+    blob: BlobPath,
+    auth: Authorization)
+      : Fragment =
+    fr"COPY" ++ Fragment.const(tableName.name) ++ fr"FROM" ++ s3PathFragment(bucket, blob) ++ authFragment(auth)
+
+  private def s3PathFragment(bucket: Bucket, blob: BlobPath): Fragment = {
+    val path = blob.path.map(_.value).intercalate("/")
+
+    fr"'s3://${bucket.value}/$path'"
+  }
+
+  private def authFragment(auth: Authorization): Fragment = auth match {
+    case Authorization.RoleARN(arn) =>
+      fr"iam_role '$arn'"
+    case Authorization.Keys(accessKey, secretKey) =>
+      fr"access_key_id '${accessKey.value}'" ++ fr"secret_access_key '${secretKey.value}'"
+  }
+
+  private def createTableQuery(tableName: TableName, columns: NonEmptyList[Fragment]): Fragment =
+    fr"CREATE TABLE" ++ Fragment.const(tableName.name) ++
+      Fragments.parentheses(columns.intercalate(fr","))
+
+  private def mkErrorString(errs: NonEmptyList[ColumnType.Scalar]): String =
+    errs
+      .map(err => s"Column of type ${err.show} is not supported by Redshift")
+      .intercalate(", ")
 
   private def mkColumn(c: TableColumn): ValidatedNel[ColumnType.Scalar, Fragment] =
     columnTypeToRedshift(c.tpe).map(Fragment.const(c.name) ++ _)
@@ -102,4 +157,6 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
       case ColumnType.String => fr0"TEXT".validNel
     }
 
+  private def debug(msg: String): F[Unit] =
+    Sync[F].delay(log.debug(msg))
 }

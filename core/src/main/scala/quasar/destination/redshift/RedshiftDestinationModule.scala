@@ -23,7 +23,7 @@ import scala.util.Random
 
 import quasar.api.destination.DestinationError.InitializationError
 import quasar.api.destination.{Destination, DestinationError, DestinationType}
-import quasar.blobstore.s3.{AccessKey, Region, SecretKey, S3PutService}
+import quasar.blobstore.s3.{AccessKey, Region, S3DeleteService, S3PutService, SecretKey}
 import quasar.connector.{DestinationModule, MonadResourceErr}
 import quasar.concurrent.NamedDaemonThreadFactory
 
@@ -89,9 +89,10 @@ object RedshiftDestinationModule extends DestinationModule {
       client <- EitherT.right[InitializationError[Json]][Resource[F, ?], S3AsyncClient](
         s3Client[F](uploadCfg.accessKey, uploadCfg.secretKey, uploadCfg.region))
 
+      deleteService = S3DeleteService(client, uploadCfg.bucket)
       putService = S3PutService(client, PartSize, uploadCfg.bucket)
 
-      dest: Destination[F] = new RedshiftDestination[F](putService, cfg, xa)
+      dest: Destination[F] = new RedshiftDestination[F](deleteService, putService, cfg, xa)
 
     } yield dest).value
 

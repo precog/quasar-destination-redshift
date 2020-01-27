@@ -8,7 +8,7 @@ scmInfo in ThisBuild := Some(ScmInfo(
 
 val DoobieVersion = "0.7.0"
 val ArgonautVersion = "6.2.3"
-val AsyncBlobstoreVersion = "1.1.0-bead335"
+val AsyncBlobstoreVersion = "1.1.0-df4ba20"
 val AwsSdkVersion = "2.9.1"
 val AwsV1SdkVersion = "1.11.634"
 val Fs2Version = "1.0.5"
