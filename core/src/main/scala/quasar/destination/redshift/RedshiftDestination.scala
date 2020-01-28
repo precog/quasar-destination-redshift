@@ -154,15 +154,15 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
       .intercalate(", ")
 
   private def mkColumn(c: TableColumn): ValidatedNel[ColumnType.Scalar, Fragment] =
-    columnTypeToRedshift(c.tpe).map(Fragment.const(s"${c.name}") ++ _)
+    columnTypeToRedshift(c.tpe).map(Fragment.const(s""""${c.name}"""") ++ _)
 
   private def columnTypeToRedshift(ct: ColumnType.Scalar)
       : ValidatedNel[ColumnType.Scalar, Fragment] =
     ct match {
       case ColumnType.Null => fr0"SMALLINT".validNel
       case ColumnType.Boolean => fr0"BOOLEAN".validNel
-      case lt @ ColumnType.LocalTime => "TIMESTAMP".invalidNel
-      case ot @ ColumnType.OffsetTime => "TIMESTAMPTZ".invalidNel
+      case lt @ ColumnType.LocalTime => fr0"TIMESTAMP".validNel
+      case ot @ ColumnType.OffsetTime => fr0"TIMESTAMPTZ".validNel
       case ColumnType.LocalDate => fr0"DATE".validNel
       case od @ ColumnType.OffsetDate => od.invalidNel
       case ColumnType.LocalDateTime => fr0"TIMESTAMP".validNel
