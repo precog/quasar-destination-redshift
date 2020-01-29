@@ -41,6 +41,7 @@ import fs2.{Stream, gzip}
 
 import org.slf4s.Logging
 
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 import scalaz.NonEmptyList
@@ -53,12 +54,22 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
   config: RedshiftConfig,
   xa: Transactor[F]) extends Destination[F] with Logging {
 
+  private val RedshiftRenderConfig = RenderConfig.Csv(
+    includeHeader = false,
+    includeBom = false,
+    // RedShift doesn't have time-only data types so we fake it by prepending an arbitrary date (1900-01-01)
+    offsetDateTimeFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ssx"),
+    offsetTimeFormat = DateTimeFormatter.ofPattern("'1900-01-01' HH:mm:ssx"),
+    localDateTimeFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss"),
+    localTimeFormat = DateTimeFormatter.ofPattern("'1900-01-01' HH:mm:ss"),
+    localDateFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd"))
+
   def destinationType: DestinationType =
     RedshiftDestinationModule.destinationType
 
   def sinks: NonEmptyList[ResultSink[F]] = NonEmptyList(csvSink)
 
-  private val csvSink: ResultSink[F] = ResultSink.csv[F](RenderConfig.Csv()) {
+  private val csvSink: ResultSink[F] = ResultSink.csv[F](RedshiftRenderConfig) {
     case (path, columns, bytes) => Stream.eval({
       for {
         cols <- Sync[F].fromEither(ensureValidColumns(columns).leftMap(new RuntimeException(_)))
@@ -124,8 +135,6 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
        authFragment(auth) ++
        fr"CSV" ++
        fr"GZIP" ++
-       fr"IGNOREHEADER 1" ++
-       fr"TIMEFORMAT 'auto'" ++
        fr"EMPTYASNULL"
 
   private def s3PathFragment(bucket: Bucket, prefix: PrefixPath): Fragment = {
