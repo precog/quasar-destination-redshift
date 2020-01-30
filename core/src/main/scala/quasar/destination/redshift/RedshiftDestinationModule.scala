@@ -23,7 +23,16 @@ import scala.util.Random
 
 import quasar.api.destination.DestinationError.InitializationError
 import quasar.api.destination.{Destination, DestinationError, DestinationType}
-import quasar.blobstore.s3.{AccessKey, Region, S3DeleteService, S3PutService, SecretKey}
+import quasar.blobstore.s3.{
+  AccessKey,
+  Bucket,
+  Region,
+  S3DeleteService,
+  S3PutService,
+  S3StatusService,
+  SecretKey
+}
+import quasar.blobstore.BlobstoreStatus
 import quasar.connector.{DestinationModule, MonadResourceErr}
 import quasar.concurrent.NamedDaemonThreadFactory
 
@@ -97,7 +106,8 @@ object RedshiftDestinationModule extends DestinationModule {
       client <- EitherT.right[InitializationError[Json]][Resource[F, ?], S3AsyncClient](
         s3Client[F](uploadCfg.accessKey, uploadCfg.secretKey, uploadCfg.region))
 
-      _ <- EitherT(Resource.liftF(validConnection(xa, config)))
+      _ <- EitherT(Resource.liftF(validDatabaseConnection[F](xa, config)))
+      _ <- EitherT(Resource.liftF(validBucket[F](client, config, uploadCfg.bucket)))
 
       deleteService = S3DeleteService(client, uploadCfg.bucket)
 
@@ -107,7 +117,7 @@ object RedshiftDestinationModule extends DestinationModule {
 
     } yield dest).value
 
-  private def validConnection[F[_]: Sync](xa: Transactor[F], config: Json)
+  private def validDatabaseConnection[F[_]: Sync](xa: Transactor[F], config: Json)
       : F[Either[InitializationError[Json], Unit]] =
     isValid(LivenessTimeout).transact(xa).map(valid =>
       if (valid)
@@ -116,6 +126,30 @@ object RedshiftDestinationModule extends DestinationModule {
         DestinationError
           .invalidConfiguration((destinationType, config, NonEmptyList("Couldn't connect to Redshift")))
           .asLeft)
+
+  private def validBucket[F[_]: Concurrent: ContextShift](
+    client: S3AsyncClient,
+    config: Json,
+    bucket: Bucket)
+      : F[Either[InitializationError[Json], Unit]] =
+    S3StatusService(client, bucket) map {
+      case BlobstoreStatus.Ok =>
+        ().asRight
+      case BlobstoreStatus.NotFound =>
+        DestinationError
+          .invalidConfiguration(
+            (destinationType, config, NonEmptyList("Upload bucket does not exist")))
+          .asLeft
+      case BlobstoreStatus.NoAccess =>
+        DestinationError.accessDenied(
+          (destinationType, config, "Access denied to upload bucket"))
+          .asLeft
+      case BlobstoreStatus.NotOk(msg) =>
+        DestinationError
+          .invalidConfiguration(
+            (destinationType, config, NonEmptyList(msg)))
+          .asLeft
+    }
 
   private def boundedPool[F[_]: Sync](name: String, threadCount: Int): Resource[F, ExecutionContext] =
     Resource.make(
