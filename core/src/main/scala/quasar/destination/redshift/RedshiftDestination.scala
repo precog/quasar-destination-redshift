@@ -19,16 +19,16 @@ package quasar.destination.redshift
 import scala.{Stream => _, _}
 import scala.Predef._
 
-import quasar.api.destination.{Destination, DestinationType, ResultSink}
+import quasar.api.destination.{DestinationColumn, DestinationType, LegacyDestination, ResultSink}
 import quasar.api.push.RenderConfig
 import quasar.api.resource._
-import quasar.api.table.{ColumnType, TableColumn, TableName}
+import quasar.api.table.{ColumnType, TableName}
 import quasar.blobstore.paths.{BlobPath, PathElem, PrefixPath}
-import quasar.blobstore.services.{DeleteService, PutService}
 import quasar.blobstore.s3.Bucket
+import quasar.blobstore.services.{DeleteService, PutService}
 import quasar.connector.{MonadResourceErr, ResourceError}
 
-import cats.data.ValidatedNel
+import cats.data.{NonEmptyList, ValidatedNel}
 import cats.effect.{ConcurrentEffect, ContextShift, Sync, Timer}
 import cats.implicits._
 
@@ -44,21 +44,19 @@ import org.slf4s.Logging
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
-import scalaz.NonEmptyList
-
 import shims._
 
 final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
   deleteService: DeleteService[F],
   put: PutService[F],
   config: RedshiftConfig,
-  xa: Transactor[F]) extends Destination[F] with Logging {
+  xa: Transactor[F]) extends LegacyDestination[F] with Logging {
 
   private val RedshiftRenderConfig = RenderConfig.Csv(
     includeHeader = false,
     includeBom = false,
-    // RedShift doesn't have time-only data types so we fake it by prepending an arbitrary date (1900-01-01)
     offsetDateTimeFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ssx"),
+    // RedShift doesn't have time-only data types so we fake it by prepending an arbitrary date (1900-01-01)
     offsetTimeFormat = DateTimeFormatter.ofPattern("'1900-01-01' HH:mm:ssx"),
     localDateTimeFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss"),
     localTimeFormat = DateTimeFormatter.ofPattern("'1900-01-01' HH:mm:ss"),
@@ -67,54 +65,54 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
   def destinationType: DestinationType =
     RedshiftDestinationModule.destinationType
 
-  def sinks: NonEmptyList[ResultSink[F]] = NonEmptyList(csvSink)
+  def sinks: NonEmptyList[ResultSink[F, ColumnType.Scalar]] =
+    NonEmptyList.one(csvSink)
 
-  private val csvSink: ResultSink[F] = ResultSink.csv[F](RedshiftRenderConfig) {
-    case (path, columns, bytes) => Stream.eval({
-      for {
-        cols <- Sync[F].fromEither(ensureValidColumns(columns).leftMap(new RuntimeException(_)))
+  private val csvSink: ResultSink[F, ColumnType.Scalar] =
+    ResultSink.csv[F, ColumnType.Scalar](RedshiftRenderConfig) {
+      case (path, columns, bytes) => Stream.eval({
+        for {
+          cols <- Sync[F].fromEither(ensureValidColumns(columns).leftMap(new RuntimeException(_)))
 
-        tableName <- ensureValidTableName(path)
+          tableName <- ensureValidTableName(path)
 
-        compressed = bytes.through(gzip.compress(1024))
+          compressed = bytes.through(gzip.compress(1024))
 
-        suffix <- Sync[F].delay(UUID.randomUUID().toString)
+          suffix <- Sync[F].delay(UUID.randomUUID().toString)
 
-        prefix = s"reform-$suffix"
-        freshName = s"$prefix/0.gz"
+          prefix = s"reform-$suffix"
+          freshName = s"$prefix/0.gz"
 
-        uploadPath = BlobPath(List(PathElem(freshName)))
+          uploadPath = BlobPath(List(PathElem(freshName)))
 
-        _ <- put((uploadPath, compressed))
+          _ <- put((uploadPath, compressed))
 
-        dropQuery = dropTableQuery(tableName).update
+          dropQuery = dropTableQuery(tableName).update
 
-        createQuery = createTableQuery(tableName, cols).update
+          createQuery = createTableQuery(tableName, cols).update
 
-        copyQuery = copyTableQuery(
-          tableName,
-          config.uploadBucket.bucket,
-          PrefixPath(List(PathElem(prefix))),
-          config.authorization).update
+          copyQuery = copyTableQuery(
+            tableName,
+            config.uploadBucket.bucket,
+            PrefixPath(List(PathElem(prefix))),
+            config.authorization).update
 
-        _ <- debug(s"Drop table query: ${dropQuery.sql}")
+          _ <- debug(s"Drop table query: ${dropQuery.sql}")
 
-        _ <- debug(s"Create table query: ${createQuery.sql}")
+          _ <- debug(s"Create table query: ${createQuery.sql}")
 
-        _ <- debug(s"Copy table query: ${copyQuery.sql}")
+          _ <- debug(s"Copy table query: ${copyQuery.sql}")
 
-        _ <- (dropQuery.run *> createQuery.run *> copyQuery.run).transact(xa)
+          _ <- (dropQuery.run *> createQuery.run *> copyQuery.run).transact(xa)
 
-      } yield ()
-    })
-  }
+        } yield ()
+      })
+    }
 
-  private def ensureValidColumns(columns: List[TableColumn]): Either[String, NonEmptyList[Fragment]] =
-    for {
-      cols0 <- columns.toNel.toRight("No columns specified")
-      cols <- cols0.traverse(mkColumn(_)).toEither.leftMap(errs =>
-        s"Some column types are not supported: ${mkErrorString(errs.asScalaz)}")
-    } yield cols.asScalaz
+  private def ensureValidColumns(columns: NonEmptyList[DestinationColumn[ColumnType.Scalar]])
+      : Either[String, NonEmptyList[Fragment]] =
+    columns.traverse(mkColumn(_)).toEither.leftMap(errs =>
+      s"Some column types are not supported: ${mkErrorString(errs)}")
 
   private def ensureValidTableName(r: ResourcePath): F[TableName] =
     r match {
@@ -162,7 +160,8 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
       .map(err => s"Column of type ${err.show} is not supported by Redshift")
       .intercalate(", ")
 
-  private def mkColumn(c: TableColumn): ValidatedNel[ColumnType.Scalar, Fragment] =
+  private def mkColumn(c: DestinationColumn[ColumnType.Scalar])
+      : ValidatedNel[ColumnType.Scalar, Fragment] =
     columnTypeToRedshift(c.tpe).map(Fragment.const(s""""${c.name}"""") ++ _)
 
   private def columnTypeToRedshift(ct: ColumnType.Scalar)
