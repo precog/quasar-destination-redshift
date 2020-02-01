@@ -23,7 +23,7 @@ import quasar.api.destination.{DestinationColumn, DestinationType, LegacyDestina
 import quasar.api.push.RenderConfig
 import quasar.api.resource._
 import quasar.api.table.{ColumnType, TableName}
-import quasar.blobstore.paths.{BlobPath, PathElem, PrefixPath}
+import quasar.blobstore.paths.{BlobPath, PathElem}
 import quasar.blobstore.s3.Bucket
 import quasar.blobstore.services.{DeleteService, PutService}
 import quasar.connector.{MonadResourceErr, ResourceError}
@@ -70,7 +70,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
   private val csvSink: ResultSink[F, ColumnType.Scalar] =
     ResultSink.csv[F, ColumnType.Scalar](RedshiftRenderConfig) {
-      case (path, columns, bytes) => Stream.eval({
+      case (path, columns, bytes) => Stream.force(
         for {
           cols <- Sync[F].fromEither(ensureValidColumns(columns).leftMap(new RuntimeException(_)))
 
@@ -80,34 +80,52 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
           suffix <- Sync[F].delay(UUID.randomUUID().toString)
 
-          prefix = s"reform-$suffix"
-          freshName = s"$prefix/0.gz"
+          freshName = s"reform-$suffix.gz"
 
           uploadPath = BlobPath(List(PathElem(freshName)))
 
           _ <- put((uploadPath, compressed))
 
-          dropQuery = dropTableQuery(tableName).update
+          pushF = push(tableName, uploadPath, config.uploadBucket.bucket, cols, config.authorization)
 
-          createQuery = createTableQuery(tableName, cols).update
+          pushS = Stream.eval(pushF).onFinalize(deleteFile(uploadPath))
 
-          copyQuery = copyTableQuery(
-            tableName,
-            config.uploadBucket.bucket,
-            PrefixPath(List(PathElem(prefix))),
-            config.authorization).update
+        } yield pushS)
+  }
 
-          _ <- debug(s"Drop table query: ${dropQuery.sql}")
+  private def deleteFile(path: BlobPath): F[Unit] =
+    deleteService(path).void
 
-          _ <- debug(s"Create table query: ${createQuery.sql}")
+  private def push(
+    tableName: TableName,
+    path: BlobPath,
+    bucket: Bucket,
+    cols: NonEmptyList[Fragment],
+    authorization: Authorization)
+      : F[Unit] = {
+    val dropQuery = dropTableQuery(tableName).update
 
-          _ <- debug(s"Copy table query: ${copyQuery.sql}")
+    val createQuery = createTableQuery(tableName, cols).update
 
-          _ <- (dropQuery.run *> createQuery.run *> copyQuery.run).transact(xa)
+    val copyQuery = copyTableQuery(
+      tableName,
+      bucket,
+      path,
+      authorization).update
 
-        } yield ()
-      })
-    }
+    for {
+      _ <- debug(s"Drop table query: ${dropQuery.sql}")
+
+      _ <- debug(s"Create table query: ${createQuery.sql}")
+
+      _ <- debug(s"Copy table query: ${copyQuery.sql}")
+
+      _ <- (dropQuery.run *> createQuery.run *> copyQuery.run).transact(xa)
+
+      _ <- debug("Finished table copy")
+
+    } yield ()
+  }
 
   private def ensureValidColumns(columns: NonEmptyList[DestinationColumn[ColumnType.Scalar]])
       : Either[String, NonEmptyList[Fragment]] =
@@ -123,7 +141,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
   private def copyTableQuery(
     tableName: TableName,
     bucket: Bucket,
-    blob: PrefixPath,
+    blob: BlobPath,
     auth: Authorization)
       : Fragment =
     fr"COPY" ++
@@ -135,10 +153,10 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
        fr"GZIP" ++
        fr"EMPTYASNULL"
 
-  private def s3PathFragment(bucket: Bucket, prefix: PrefixPath): Fragment = {
+  private def s3PathFragment(bucket: Bucket, prefix: BlobPath): Fragment = {
     val path = prefix.path.map(_.value).intercalate("/")
 
-    Fragment.const(s"'s3://${bucket.value}/$path/'")
+    Fragment.const(s"'s3://${bucket.value}/$path'")
   }
 
   private def authFragment(auth: Authorization): Fragment = auth match {
