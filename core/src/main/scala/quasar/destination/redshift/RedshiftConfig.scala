@@ -38,8 +38,8 @@ final case class Password(value: String)
 sealed trait Authorization
 
 object Authorization {
-  final case class RoleARN(value: String) extends Authorization
-  final case class Keys(accessKey: AccessKey, secretKey: SecretKey) extends Authorization
+  final case class RoleARN(value: String, region: Region) extends Authorization
+  final case class Keys(accessKey: AccessKey, secretKey: SecretKey, region: Region) extends Authorization
 }
 
 final case class BucketConfig(
@@ -72,29 +72,34 @@ object RedshiftConfig {
       (bucket, accessKey, secretKey, region) =>
         BucketConfig(Bucket(bucket), AccessKey(accessKey), SecretKey(secretKey), Region(region)),
       bc => (bc.bucket.value, bc.accessKey.value, bc.secretKey.value, bc.region.value).some)(
-      "bucket", "accessKey", "secretKey", "region")
+        "bucket", "accessKey", "secretKey", "region")
 
   implicit val authorizationCodecJson: CodecJson[Authorization] =
     CodecJson[Authorization]({
-      case Authorization.RoleARN(arn) =>
+      case Authorization.RoleARN(arn, region) =>
         Json.obj(
           "type" := "role",
-          "arn" := arn)
-      case Authorization.Keys(accessKey, secretKey) =>
+          "arn" := arn,
+          "region" := region.value)
+      case Authorization.Keys(accessKey, secretKey, region) =>
         Json.obj(
           "type" := "keys",
           "accessKey" := accessKey.value,
-          "secretKey" := secretKey.value)
+          "secretKey" := secretKey.value,
+          "region" := region.value)
     }, (c => for {
       authType <- c.get[String]("type")
       res <- authType match {
-        case "role" =>
-          c.get[String]("arn").map(Authorization.RoleARN(_))
+        case "role" => for {
+          arn <- c.get[String]("arn")
+          region <- c.get[String]("region")
+        } yield Authorization.RoleARN(arn, Region(region))
         case "keys" =>
           for {
             accessKey <- c.get[String]("accessKey")
             secretKey <- c.get[String]("secretKey")
-          } yield Authorization.Keys(AccessKey(accessKey), SecretKey(secretKey))
+            region <- c.get[String]("region")
+          } yield Authorization.Keys(AccessKey(accessKey), SecretKey(secretKey), Region(region))
         case _ => DecodeResult.fail("'auth' must be 'role' or 'keys'", c.history)
       }
     } yield res))

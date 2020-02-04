@@ -24,7 +24,12 @@ import quasar.api.push.RenderConfig
 import quasar.api.resource._
 import quasar.api.table.{ColumnType, TableName}
 import quasar.blobstore.paths.{BlobPath, PathElem}
-import quasar.blobstore.s3.Bucket
+import quasar.blobstore.s3.{
+  AccessKey,
+  Bucket,
+  SecretKey,
+  Region
+}
 import quasar.blobstore.services.{DeleteService, PutService}
 import quasar.connector.{MonadResourceErr, ResourceError}
 
@@ -107,18 +112,26 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
     val createQuery = createTableQuery(tableName, cols).update
 
-    val copyQuery = copyTableQuery(
-      tableName,
-      bucket,
-      path,
-      authorization).update
+    val copyQuery =
+      copyTableQuery(
+        tableName,
+        bucket,
+        path,
+        authorization).update
+
+    val copyQueryRedacted =
+      copyTableQuery(
+        tableName,
+        bucket,
+        path,
+        redactAuth(authorization)).update
 
     for {
       _ <- debug(s"Drop table query: ${dropQuery.sql}")
 
       _ <- debug(s"Create table query: ${createQuery.sql}")
 
-      _ <- debug(s"Copy table query: ${copyQuery.sql}")
+      _ <- debug(s"Copy table query: ${copyQueryRedacted.sql}")
 
       _ <- (dropQuery.run *> createQuery.run *> copyQuery.run).transact(xa)
 
@@ -134,9 +147,12 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
   private def ensureValidTableName(r: ResourcePath): F[TableName] =
     r match {
-      case file /: ResourcePath.Root => TableName(file).pure[F]
+      case file /: ResourcePath.Root => TableName(escape(file)).pure[F]
       case _ => MonadResourceErr[F].raiseError(ResourceError.notAResource(r))
     }
+
+  def escape(ident: String): String =
+    replace("\\", "").replace("'", "''")
 
   private def copyTableQuery(
     tableName: TableName,
@@ -160,10 +176,19 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
   }
 
   private def authFragment(auth: Authorization): Fragment = auth match {
-    case Authorization.RoleARN(arn) =>
-      Fragment.const(s"iam_role '$arn'")
-    case Authorization.Keys(accessKey, secretKey) =>
-      Fragment.const(s"access_key_id '${accessKey.value}' secret_access_key '${secretKey.value}'")
+    case Authorization.RoleARN(arn0, Region(region0)) => {
+      val arn = escape(arn0)
+      val region = escape(region0)
+
+      Fragment.const(s"iam_role '$arn' region '$region'")
+    }
+    case Authorization.Keys(AccessKey(accessKey0), SecretKey(secretKey0), Region(region0)) => {
+      val accessKey = escape(accessKey0)
+      val secretKey = escape(secretKey0)
+      val region = escape(region0)
+
+      Fragment.const(s"access_key_id '$accessKey' secret_access_key '$secretKey' region '$region'")
+    }
   }
 
   private def createTableQuery(tableName: TableName, columns: NonEmptyList[Fragment]): Fragment =
@@ -180,7 +205,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
   private def mkColumn(c: DestinationColumn[ColumnType.Scalar])
       : ValidatedNel[ColumnType.Scalar, Fragment] =
-    columnTypeToRedshift(c.tpe).map(Fragment.const(s""""${c.name}"""") ++ _)
+    columnTypeToRedshift(c.tpe).map(Fragment.const(s""""${escape(c.name)}"""") ++ _)
 
   private def columnTypeToRedshift(ct: ColumnType.Scalar)
       : ValidatedNel[ColumnType.Scalar, Fragment] =

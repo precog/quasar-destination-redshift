@@ -60,7 +60,6 @@ import software.amazon.awssdk.services.s3.S3AsyncClient
 
 object RedshiftDestinationModule extends DestinationModule {
   val RedshiftDriverFqcn = "com.amazon.redshift.jdbc.Driver"
-  val Redacted = "<REDACTED>"
   val PoolSize = 10
   val PartSize = 10 * 1024 * 1024
   val LivenessTimeout = 60
@@ -71,12 +70,7 @@ object RedshiftDestinationModule extends DestinationModule {
     cfg.as[RedshiftConfig].toOption.fold(Json.jEmptyObject)(rsc =>
       rsc.copy(
         password = Password(Redacted),
-        authorization = rsc.authorization match {
-          case Authorization.RoleARN(_) =>
-            rsc.authorization
-          case Authorization.Keys(ak, _) =>
-            Authorization.Keys(ak, SecretKey(Redacted))
-        },
+        authorization = redactAuth(rsc.authorization),
         uploadBucket = rsc.uploadBucket.copy(secretKey = SecretKey(Redacted))).asJson)
 
   def destination[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
