@@ -67,14 +67,14 @@ object RedshiftConfig {
           DecodeResult.ok(_))
       } yield uri)
 
-  implicit val bucketConfigCodecJson: CodecJson[BucketConfig] =
+  private implicit val bucketConfigCodecJson: CodecJson[BucketConfig] =
     casecodec4[String, String, String, String, BucketConfig](
       (bucket, accessKey, secretKey, region) =>
         BucketConfig(Bucket(bucket), AccessKey(accessKey), SecretKey(secretKey), Region(region)),
       bc => (bc.bucket.value, bc.accessKey.value, bc.secretKey.value, bc.region.value).some)(
         "bucket", "accessKey", "secretKey", "region")
 
-  implicit val authorizationCodecJson: CodecJson[Authorization] =
+  private implicit val authorizationCodecJson: CodecJson[Authorization] =
     CodecJson[Authorization]({
       case Authorization.RoleARN(arn, region) =>
         Json.obj(

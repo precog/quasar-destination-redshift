@@ -152,7 +152,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
     }
 
   def escape(ident: String): String =
-    replace("\\", "").replace("'", "''")
+    ident.replace("\\", "").replace("'", "''")
 
   private def copyTableQuery(
     tableName: TableName,
