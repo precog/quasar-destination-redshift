@@ -25,24 +25,78 @@ import java.net.URI
 import org.specs2.mutable.Specification
 
 object RedshiftConfigSpec extends Specification {
-  "parses a valid config" >> {
-    val common =
-      Json.obj(
-        "bucket":= Json.obj(
-          "bucket":= "foobarbucket",
-          "accessKey":= "access key",
-          "secretKey":= "secret key",
-          "region":= "outer-space"),
-        "jdbcUri":= "jdbc:redshift://redshift-cluster-1.example.outer-space.redshift.amazonaws.com:5439/dev",
-        "user":= "awsuser",
-        "password":= "super secret password")
+  val jdbcUri = "jdbc:redshift://redshift-cluster-1.example.outer-space.redshift.amazonaws.com:5439/dev"
 
+  val common =
+    Json.obj(
+      "bucket":= Json.obj(
+        "bucket":= "foobarbucket",
+        "accessKey":= "access key",
+        "secretKey":= "secret key",
+        "region":= "outer-space"),
+      "jdbcUri":= jdbcUri,
+      "user":= "awsuser",
+      "password":= "super secret password")
+
+  val roleAuth =
+    Json.obj(
+      "type":= "role",
+      "arn":= "arn:aws:iam::account-id:role/test-role",
+      "region":= "outer-space")
+
+  val keyAuth =
+    Json.obj(
+      "type":= "keys",
+      "accessKey":= "access key",
+      "secretKey":= "secret key",
+      "region":= "outer-space")
+
+  "sanitizes config" >> {
     "with role authorization" >> {
-      val testConfig = common.withObject(c =>
-        c + ("authorization", Json.obj(
-             "type":= "role",
-             "arn":= "arn:aws:iam::account-id:role/test-role",
-             "region":= "outer-space")))
+      val sanitized =
+        RedshiftDestinationModule.sanitizeDestinationConfig(
+          common.withObject(_ + ("authorization", roleAuth)))
+
+      val expected =
+        Json.obj(
+          "bucket":= Json.obj(
+            "bucket":= "foobarbucket",
+            "accessKey":= "access key",
+            "secretKey":= "<REDACTED>",
+            "region":= "outer-space"),
+          "jdbcUri":= jdbcUri,
+          "user":= "awsuser",
+          "password":= "<REDACTED>",
+          "authorization" := roleAuth)
+
+      sanitized must_== expected
+    }
+
+    "with key authorization" >> {
+      val sanitized =
+        RedshiftDestinationModule.sanitizeDestinationConfig(
+          common.withObject(_ + ("authorization", keyAuth)))
+
+      val expected =
+        Json.obj(
+          "bucket":= Json.obj(
+            "bucket":= "foobarbucket",
+            "accessKey":= "access key",
+            "secretKey":= "<REDACTED>",
+            "region":= "outer-space"),
+          "jdbcUri":= jdbcUri,
+          "user":= "awsuser",
+          "password":= "<REDACTED>",
+          "authorization" := keyAuth.withObject(_ + ("secretKey", Json.jString("<REDACTED>"))))
+
+      sanitized must_== expected
+    }
+  }
+
+  "parses a valid config" >> {
+    "with role authorization" >> {
+      val testConfig =
+        common.withObject(_ + ("authorization", roleAuth))
 
       testConfig.as[RedshiftConfig].result must beRight(
         RedshiftConfig(
@@ -51,7 +105,7 @@ object RedshiftConfigSpec extends Specification {
             AccessKey("access key"),
             SecretKey("secret key"),
             Region("outer-space")),
-          new URI("jdbc:redshift://redshift-cluster-1.example.outer-space.redshift.amazonaws.com:5439/dev"),
+          new URI(jdbcUri),
           User("awsuser"),
           Password("super secret password"),
           Authorization.RoleARN(
@@ -60,12 +114,8 @@ object RedshiftConfigSpec extends Specification {
     }
 
     "with key authorization" >> {
-      val testConfig = common.withObject(c =>
-        c + ("authorization", Json.obj(
-          "type":= "keys",
-          "accessKey":= "access key",
-          "secretKey":= "secret key",
-          "region":= "outer-space")))
+      val testConfig =
+        common.withObject(_ + ("authorization", keyAuth))
 
       testConfig.as[RedshiftConfig].result must beRight(
         RedshiftConfig(
@@ -74,7 +124,7 @@ object RedshiftConfigSpec extends Specification {
             AccessKey("access key"),
             SecretKey("secret key"),
             Region("outer-space")),
-          new URI("jdbc:redshift://redshift-cluster-1.example.outer-space.redshift.amazonaws.com:5439/dev"),
+          new URI(jdbcUri),
           User("awsuser"),
           Password("super secret password"),
           Authorization.Keys(
