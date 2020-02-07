@@ -151,8 +151,18 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
       case _ => MonadResourceErr[F].raiseError(ResourceError.notAResource(r))
     }
 
-  def escape(ident: String): String =
-    ident.replace("\\", "").replace("'", "''")
+  def escape(ident: String): String = {
+    val escaped =
+      ident
+        .replace("\\", "")
+        .replace(" ", "_")
+        .replace("\"", "\"\"")
+
+    s""""$escaped""""
+  }
+
+  def removeSingleQuotes(str: String): String =
+    str.replace("'", "")
 
   private def copyTableQuery(
     tableName: TableName,
@@ -177,15 +187,15 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
   private def authFragment(auth: Authorization): Fragment = auth match {
     case Authorization.RoleARN(arn0, Region(region0)) => {
-      val arn = escape(arn0)
-      val region = escape(region0)
+      val arn = removeSingleQuotes(arn0)
+      val region = removeSingleQuotes(region0)
 
       Fragment.const(s"iam_role '$arn' region '$region'")
     }
     case Authorization.Keys(AccessKey(accessKey0), SecretKey(secretKey0), Region(region0)) => {
-      val accessKey = escape(accessKey0)
-      val secretKey = escape(secretKey0)
-      val region = escape(region0)
+      val accessKey = removeSingleQuotes(accessKey0)
+      val secretKey = removeSingleQuotes(secretKey0)
+      val region = removeSingleQuotes(region0)
 
       Fragment.const(s"access_key_id '$accessKey' secret_access_key '$secretKey' region '$region'")
     }
@@ -205,7 +215,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
   private def mkColumn(c: DestinationColumn[ColumnType.Scalar])
       : ValidatedNel[ColumnType.Scalar, Fragment] =
-    columnTypeToRedshift(c.tpe).map(Fragment.const(s""""${escape(c.name)}"""") ++ _)
+    columnTypeToRedshift(c.tpe).map(Fragment.const(escape(c.name)) ++ _)
 
   private def columnTypeToRedshift(ct: ColumnType.Scalar)
       : ValidatedNel[ColumnType.Scalar, Fragment] =
