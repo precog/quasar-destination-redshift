@@ -36,6 +36,9 @@ script:
       if [ $TRAVIS_PULL_REQUEST == "false" ] && [[ "$TRAVIS_BRANCH" =~ backport/v.*|master ]]; then
         $SBT transferPublishAndTagResources;
         TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-destination-redshift';
+        bumpInDownstream() { echo $1 > slamdata-destination-redshift-version; }
+        export -f bumpInDownstream
+        scripts/bumpDependentProject slamdata slamx bumpInDownstream
       fi
 
 after_success:
