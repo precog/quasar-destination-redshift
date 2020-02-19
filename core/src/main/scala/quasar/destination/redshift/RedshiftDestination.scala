@@ -19,10 +19,10 @@ package quasar.destination.redshift
 import scala.{Stream => _, _}
 import scala.Predef._
 
-import quasar.api.destination.{DestinationColumn, DestinationType, LegacyDestination, ResultSink}
-import quasar.api.push.RenderConfig
+import quasar.api.{Column, ColumnType}
+import quasar.api.destination.DestinationType
 import quasar.api.resource._
-import quasar.api.table.{ColumnType, TableName}
+import quasar.api.table.TableName
 import quasar.blobstore.paths.{BlobPath, PathElem}
 import quasar.blobstore.s3.{
   AccessKey,
@@ -32,6 +32,8 @@ import quasar.blobstore.s3.{
 }
 import quasar.blobstore.services.{DeleteService, PutService}
 import quasar.connector.{MonadResourceErr, ResourceError}
+import quasar.connector.destination.{LegacyDestination, ResultSink}
+import quasar.connector.render.RenderConfig
 
 import cats.data.{NonEmptyList, ValidatedNel}
 import cats.effect.{ConcurrentEffect, ContextShift, Sync, Timer}
@@ -74,7 +76,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
     NonEmptyList.one(csvSink)
 
   private val csvSink: ResultSink[F, ColumnType.Scalar] =
-    ResultSink.csv[F, ColumnType.Scalar](RedshiftRenderConfig) {
+    ResultSink.create[F, ColumnType.Scalar](RedshiftRenderConfig) {
       case (path, columns, bytes) => Stream.force(
         for {
           cols <- Sync[F].fromEither(ensureValidColumns(columns).leftMap(new RuntimeException(_)))
@@ -140,7 +142,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
     } yield ()
   }
 
-  private def ensureValidColumns(columns: NonEmptyList[DestinationColumn[ColumnType.Scalar]])
+  private def ensureValidColumns(columns: NonEmptyList[Column[ColumnType.Scalar]])
       : Either[String, NonEmptyList[Fragment]] =
     columns.traverse(mkColumn(_)).toEither.leftMap(errs =>
       s"Some column types are not supported: ${mkErrorString(errs)}")
@@ -213,7 +215,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
       .map(err => s"Column of type ${err.show} is not supported by Redshift")
       .intercalate(", ")
 
-  private def mkColumn(c: DestinationColumn[ColumnType.Scalar])
+  private def mkColumn(c: Column[ColumnType.Scalar])
       : ValidatedNel[ColumnType.Scalar, Fragment] =
     columnTypeToRedshift(c.tpe).map(Fragment.const(escape(c.name)) ++ _)
 
