@@ -22,7 +22,7 @@ import scala.concurrent.ExecutionContext
 import scala.util.Random
 
 import quasar.api.destination.DestinationError.InitializationError
-import quasar.api.destination.{Destination, DestinationError, DestinationType}
+import quasar.api.destination.{DestinationError, DestinationType}
 import quasar.blobstore.s3.{
   AccessKey,
   Bucket,
@@ -33,7 +33,8 @@ import quasar.blobstore.s3.{
   SecretKey
 }
 import quasar.blobstore.BlobstoreStatus
-import quasar.connector.{DestinationModule, MonadResourceErr}
+import quasar.connector.MonadResourceErr
+import quasar.connector.destination.{Destination, DestinationModule}
 import quasar.concurrent.NamedDaemonThreadFactory
 
 import argonaut._, Argonaut._
