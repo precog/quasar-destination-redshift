@@ -52,8 +52,6 @@ jobs:
         uses: actions/download-artifact@v1
         with:
           name: working-dir
-      - name: Setup Git Actor
-        run: git config github.actor slamdata-bot
       - name: Set up JDK ${{ env.JDK }}
         uses: actions/setup-java@v1
         with:
@@ -62,12 +60,18 @@ jobs:
         uses: actions/setup-ruby@v1
         with:
           ruby-version: '2.6'
+      - name: Setup Git Actor
+        run: git config github.actor slamdata-bot
+      - name: Create scripts dir
+        run: mkdir ./scripts
       - name: Transfer Common Resources
         run: $SBT transferCommonResources
-      - name: Common setup
-        run: ./scripts/commonSetup
       - name: Export common secrets
         run: $SBT exportSecretsForActions
+      - name: Run common setup
+        run: ./scripts/commonSetup
+      - name: Transfer Publish and Tag Resources
+        run: $SBT transferPublishAndTagResources
       - name: Publish and Tag
         run: ./scripts/publishAndTag 'slamdata/quasar-destination-redshift'
       - name: Bump Downstream
