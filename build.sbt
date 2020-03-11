@@ -10,7 +10,6 @@ scmInfo in ThisBuild := Some(ScmInfo(
 
 val DoobieVersion = "0.7.0"
 val ArgonautVersion = "6.2.3"
-val AsyncBlobstoreVersion = "2.1.0"
 val AwsSdkVersion = "2.9.1"
 val Fs2Version = "2.1.0"
 val SpecsVersion = "4.8.3"
@@ -20,8 +19,6 @@ val RedshiftRepository = "redshift" at "https://s3.amazonaws.com/redshift-maven-
 // Include to also publish a project's tests
 lazy val publishTestsSettings = Seq(
   Test / packageBin / publishArtifact := true)
-
-lazy val QuasarVersion = IO.read(file("./quasar-version")).trim
 
 lazy val root = project
   .in(file("."))
@@ -35,7 +32,7 @@ lazy val core = project
   .settings(
     resolvers += RedshiftRepository,
     quasarPluginName := "redshift",
-    quasarPluginQuasarVersion := QuasarVersion,
+    quasarPluginQuasarVersion := managedVersions.value("slamdata-quasar"),
     quasarPluginDestinationFqcn := Some("quasar.destination.redshift.RedshiftDestinationModule$"),
     quasarPluginDependencies ++= Seq(
       "org.slf4s" %% "slf4s-api" % "1.7.25",
@@ -43,8 +40,8 @@ lazy val core = project
       "co.fs2" %% "fs2-core" % Fs2Version,
       "org.tpolecat" %% "doobie-core" % DoobieVersion,
       "org.tpolecat" %% "doobie-hikari" % DoobieVersion,
-      "com.slamdata" %% "async-blobstore-core" % AsyncBlobstoreVersion,
-      "com.slamdata" %% "async-blobstore-s3" % AsyncBlobstoreVersion,
+      "com.slamdata" %% "async-blobstore-core" % managedVersions.value("slamdata-async-blobstore"),
+      "com.slamdata" %% "async-blobstore-s3" % managedVersions.value("slamdata-async-blobstore"),
       "com.slamdata" %% "fs2-gzip" % "1.1.1",
       "com.amazon.redshift" % "redshift-jdbc4-no-awssdk" % "1.2.10.1009"),
     quasarPluginExtraResolvers := Seq(coursier.MavenRepository("https://s3.amazonaws.com/redshift-maven-repository/release")),
@@ -52,7 +49,7 @@ lazy val core = project
     publishAsOSSProject := false,
     libraryDependencies ++= Seq(
       "org.specs2" %% "specs2-core" % SpecsVersion % Test,
-      "com.slamdata" %% "quasar-foundation" % QuasarVersion,
-      "com.slamdata" %% "quasar-foundation" % QuasarVersion % Test classifier "tests",
+      "com.slamdata" %% "quasar-foundation" % managedVersions.value("slamdata-quasar"),
+      "com.slamdata" %% "quasar-foundation" % managedVersions.value("slamdata-quasar") % Test classifier "tests",
       "org.specs2" %% "specs2-scalacheck" % SpecsVersion % Test))
   .enablePlugins(AutomateHeaderPlugin, QuasarPlugin)
