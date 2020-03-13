@@ -1,5 +1,5 @@
 /*
- * Copyright 2014–2020 SlamData Inc.
+ * Copyright 2020 Precog Data
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ import doobie.implicits._
 
 import eu.timepit.refined.auto._
 
-import fs2.{Stream, gzip}
+import fs2.{compress, Stream}
 
 import org.slf4s.Logging
 
@@ -83,7 +83,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
           tableName <- ensureValidTableName(path)
 
-          compressed = bytes.through(gzip.compress(1024))
+          compressed = bytes.through(compress.gzip(1024))
 
           suffix <- Sync[F].delay(UUID.randomUUID().toString)
 

@@ -2,11 +2,13 @@ import scala.collection.Seq
 
 ThisBuild / scalaVersion := "2.12.10"
 
-homepage in ThisBuild := Some(url("https://github.com/slamdata/quasar-destination-redshift"))
+ThisBuild / githubRepository := "quasar-destination-redshift"
+
+homepage in ThisBuild := Some(url("https://github.com/precog/quasar-destination-redshift"))
 
 scmInfo in ThisBuild := Some(ScmInfo(
-  url("https://github.com/slamdata/quasar-destination-redshift"),
-  "scm:git@github.com:slamdata/quasar-destination-redshift.git"))
+  url("https://github.com/precog/quasar-destination-redshift"),
+  "scm:git@github.com:precog/quasar-destination-redshift.git"))
 
 val DoobieVersion = "0.7.0"
 val ArgonautVersion = "6.2.3"
@@ -32,7 +34,7 @@ lazy val core = project
   .settings(
     resolvers += RedshiftRepository,
     quasarPluginName := "redshift",
-    quasarPluginQuasarVersion := managedVersions.value("slamdata-quasar"),
+    quasarPluginQuasarVersion := managedVersions.value("precog-quasar"),
     quasarPluginDestinationFqcn := Some("quasar.destination.redshift.RedshiftDestinationModule$"),
     quasarPluginDependencies ++= Seq(
       "org.slf4s" %% "slf4s-api" % "1.7.25",
@@ -40,16 +42,15 @@ lazy val core = project
       "co.fs2" %% "fs2-core" % Fs2Version,
       "org.tpolecat" %% "doobie-core" % DoobieVersion,
       "org.tpolecat" %% "doobie-hikari" % DoobieVersion,
-      "com.slamdata" %% "async-blobstore-core" % managedVersions.value("slamdata-async-blobstore"),
-      "com.slamdata" %% "async-blobstore-s3" % managedVersions.value("slamdata-async-blobstore"),
-      "com.slamdata" %% "fs2-gzip" % "1.1.1",
+      "com.precog" %% "async-blobstore-core" % managedVersions.value("precog-async-blobstore"),
+      "com.precog" %% "async-blobstore-s3" % managedVersions.value("precog-async-blobstore"),
       "com.amazon.redshift" % "redshift-jdbc4-no-awssdk" % "1.2.10.1009"),
     quasarPluginExtraResolvers := Seq(coursier.MavenRepository("https://s3.amazonaws.com/redshift-maven-repository/release")),
     performMavenCentralSync := false,
     publishAsOSSProject := false,
     libraryDependencies ++= Seq(
       "org.specs2" %% "specs2-core" % SpecsVersion % Test,
-      "com.slamdata" %% "quasar-foundation" % managedVersions.value("slamdata-quasar"),
-      "com.slamdata" %% "quasar-foundation" % managedVersions.value("slamdata-quasar") % Test classifier "tests",
+      "com.precog" %% "quasar-foundation" % managedVersions.value("precog-quasar"),
+      "com.precog" %% "quasar-foundation" % managedVersions.value("precog-quasar") % Test classifier "tests",
       "org.specs2" %% "specs2-scalacheck" % SpecsVersion % Test))
   .enablePlugins(AutomateHeaderPlugin, QuasarPlugin)
