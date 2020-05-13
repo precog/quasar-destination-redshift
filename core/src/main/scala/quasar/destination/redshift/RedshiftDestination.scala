@@ -44,7 +44,7 @@ import doobie.implicits._
 
 import eu.timepit.refined.auto._
 
-import fs2.{compress, Stream}
+import fs2.{compression, Stream}
 
 import org.slf4s.Logging
 
@@ -83,7 +83,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
 
           tableName <- ensureValidTableName(path)
 
-          compressed = bytes.through(compress.gzip(1024))
+          compressed = bytes.through(compression.gzip(1024))
 
           suffix <- Sync[F].delay(UUID.randomUUID().toString)
 
