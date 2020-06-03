@@ -22,7 +22,6 @@ import scala.Predef._
 import quasar.api.{Column, ColumnType}
 import quasar.api.destination.DestinationType
 import quasar.api.resource._
-import quasar.api.table.TableName
 import quasar.blobstore.paths.{BlobPath, PathElem}
 import quasar.blobstore.s3.{
   AccessKey,
@@ -104,7 +103,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
     deleteService(path).void
 
   private def push(
-    tableName: TableName,
+    tableName: String,
     path: BlobPath,
     bucket: Bucket,
     cols: NonEmptyList[Fragment],
@@ -147,9 +146,9 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
     columns.traverse(mkColumn(_)).toEither.leftMap(errs =>
       s"Some column types are not supported: ${mkErrorString(errs)}")
 
-  private def ensureValidTableName(r: ResourcePath): F[TableName] =
+  private def ensureValidTableName(r: ResourcePath): F[String] =
     r match {
-      case file /: ResourcePath.Root => TableName(escape(file)).pure[F]
+      case file /: ResourcePath.Root => escape(file).pure[F]
       case _ => MonadResourceErr[F].raiseError(ResourceError.notAResource(r))
     }
 
@@ -167,13 +166,13 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
     str.replace("'", "")
 
   private def copyTableQuery(
-    tableName: TableName,
+    tableName: String,
     bucket: Bucket,
     blob: BlobPath,
     auth: Authorization)
       : Fragment =
     fr"COPY" ++
-       Fragment.const(tableName.name) ++
+       Fragment.const(tableName) ++
        fr"FROM" ++
        s3PathFragment(bucket, blob) ++
        authFragment(auth) ++
@@ -203,12 +202,12 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
     }
   }
 
-  private def createTableQuery(tableName: TableName, columns: NonEmptyList[Fragment]): Fragment =
-    fr"CREATE TABLE" ++ Fragment.const(tableName.name) ++
+  private def createTableQuery(tableName: String, columns: NonEmptyList[Fragment]): Fragment =
+    fr"CREATE TABLE" ++ Fragment.const(tableName) ++
       Fragments.parentheses(columns.intercalate(fr","))
 
-  private def dropTableQuery(tableName: TableName): Fragment =
-    fr"DROP TABLE IF EXISTS" ++ Fragment.const(tableName.name)
+  private def dropTableQuery(tableName: String): Fragment =
+    fr"DROP TABLE IF EXISTS" ++ Fragment.const(tableName)
 
   private def mkErrorString(errs: NonEmptyList[ColumnType.Scalar]): String =
     errs
