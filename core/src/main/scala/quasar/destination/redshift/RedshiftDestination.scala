@@ -41,8 +41,6 @@ import cats.implicits._
 import doobie._
 import doobie.implicits._
 
-import eu.timepit.refined.auto._
-
 import fs2.{compression, Stream}
 
 import org.slf4s.Logging
