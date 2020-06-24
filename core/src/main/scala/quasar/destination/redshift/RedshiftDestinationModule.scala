@@ -48,8 +48,6 @@ import doobie.free.connection.isValid
 import doobie.hikari.HikariTransactor
 import doobie.implicits._
 
-import eu.timepit.refined.auto._
-
 import java.util.concurrent.Executors
 
 import scalaz.NonEmptyList
