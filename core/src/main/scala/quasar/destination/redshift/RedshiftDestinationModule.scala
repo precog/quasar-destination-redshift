@@ -34,7 +34,7 @@ import quasar.blobstore.s3.{
 }
 import quasar.blobstore.BlobstoreStatus
 import quasar.connector.MonadResourceErr
-import quasar.connector.destination.{Destination, DestinationModule}
+import quasar.connector.destination.{Destination, DestinationModule, PushmiPullyu}
 import quasar.concurrent.NamedDaemonThreadFactory
 
 import argonaut._, Argonaut._
@@ -73,7 +73,9 @@ object RedshiftDestinationModule extends DestinationModule {
         uploadBucket = rsc.uploadBucket.copy(secretKey = SecretKey(Redacted))).asJson)
 
   def destination[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
-    config: Json): Resource[F, Either[InitializationError[Json], Destination[F]]] =
+      config: Json,
+      pushPull: PushmiPullyu[F])
+      : Resource[F, Either[InitializationError[Json], Destination[F]]] =
     (for {
       cfg <- EitherT.fromEither[Resource[F, ?]](config.as[RedshiftConfig].result) leftMap {
         case (err, _) => DestinationError.malformedConfiguration((destinationType, config, err))
