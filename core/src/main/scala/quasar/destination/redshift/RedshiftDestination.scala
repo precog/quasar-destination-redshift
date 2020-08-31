@@ -41,7 +41,7 @@ import cats.implicits._
 import doobie._
 import doobie.implicits._
 
-import fs2.{compression, Stream}
+import fs2.{compression, Pipe, Stream}
 
 import org.slf4s.Logging
 
@@ -73,28 +73,29 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
     NonEmptyList.one(csvSink)
 
   private val csvSink: ResultSink[F, ColumnType.Scalar] =
-    ResultSink.create[F, ColumnType.Scalar](RedshiftRenderConfig) {
-      case (path, columns, bytes) => Stream.force(
-        for {
-          cols <- Sync[F].fromEither(ensureValidColumns(columns).leftMap(new RuntimeException(_)))
+    ResultSink.create[F, ColumnType.Scalar, Byte] { (path, columns) =>
+      val pipe: Pipe[F, Byte, Unit] = bytes => Stream.force(for {
+        cols <- Sync[F].fromEither(ensureValidColumns(columns).leftMap(new RuntimeException(_)))
 
-          tableName <- ensureValidTableName(path)
+        tableName <- ensureValidTableName(path)
 
-          compressed = bytes.through(compression.gzip(bufferSize = 1024 * 32))
+        compressed = bytes.through(compression.gzip(bufferSize = 1024 * 32))
 
-          suffix <- Sync[F].delay(UUID.randomUUID().toString)
+        suffix <- Sync[F].delay(UUID.randomUUID().toString)
 
-          freshName = s"reform-$suffix.gz"
+        freshName = s"reform-$suffix.gz"
 
-          uploadPath = BlobPath(List(PathElem(freshName)))
+        uploadPath = BlobPath(List(PathElem(freshName)))
 
-          _ <- put((uploadPath, compressed))
+        _ <- put((uploadPath, compressed))
 
-          pushF = push(tableName, uploadPath, config.uploadBucket.bucket, cols, config.authorization)
+        pushF = push(tableName, uploadPath, config.uploadBucket.bucket, cols, config.authorization)
 
-          pushS = Stream.eval(pushF).onFinalize(deleteFile(uploadPath))
+        pushS = Stream.eval(pushF).onFinalize(deleteFile(uploadPath))
 
-        } yield pushS)
+      } yield pushS)
+
+      (RedshiftRenderConfig, pipe)
   }
 
   private def deleteFile(path: BlobPath): F[Unit] =
