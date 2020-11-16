@@ -230,7 +230,7 @@ final class RedshiftDestination[F[_]: ConcurrentEffect: ContextShift: MonadResou
       case ColumnType.OffsetDateTime => fr0"TIMESTAMPTZ".validNel
       case i @ ColumnType.Interval => i.invalidNel
       case ColumnType.Number => fr0"DECIMAL".validNel
-      case ColumnType.String => fr0"TEXT".validNel
+      case ColumnType.String => fr0"VARCHAR(2048)".validNel
     }
 
   private def debug(msg: String): F[Unit] =
