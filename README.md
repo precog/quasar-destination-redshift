@@ -75,3 +75,4 @@ If using `keys` based authorization. The object takes the form:
 
 `region` is the region where the staging bucket is. This is important
 for cross-region loading
+
