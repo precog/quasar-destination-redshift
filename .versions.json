@@ -1,4 +1,4 @@
 {
-  "precog-quasar": "198.0.3-f023624",
-  "precog-async-blobstore": "4.0.5-6ad35e0"
+  "precog-async-blobstore": "5.0.0",
+  "precog-quasar": "199.0.0"
 }
