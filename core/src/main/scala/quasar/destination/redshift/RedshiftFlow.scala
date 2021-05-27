@@ -232,7 +232,6 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
 object RedshiftFlow {
   val DeleteQueryLimit = 4 * 1024 * 1024
 
-  // If we ever wanted to make transactor initialized by queries we could use
   def apply[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResourceErr](
       deleteService: DeleteService[F],
       putService: PutService[F],

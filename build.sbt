@@ -45,7 +45,6 @@ lazy val core = project
       "com.precog" %% "async-blobstore-core" % managedVersions.value("precog-async-blobstore"),
       "com.precog" %% "async-blobstore-s3" % managedVersions.value("precog-async-blobstore"),
       "com.amazon.redshift" % "redshift-jdbc42" % "1.2.43.1067"),
-//    quasarPluginExtraResolvers := Seq(coursier.MavenRepository("https://s3.amazonaws.com/redshift-maven-repository/release")),
     performMavenCentralSync := false,
     publishAsOSSProject := false,
     libraryDependencies ++= Seq(
