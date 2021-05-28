@@ -382,25 +382,25 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
   val DM = RedshiftDestinationModule
 
-  val TestConnectionUrl: String =
+  def TestConnectionUrl: String =
     scala.sys.env.get("REDSHIFT_JDBC") getOrElse ""
 
-  val TestBucket: String =
+  def TestBucket: String =
     scala.sys.env.get("REDSHIFT_BUCKET") getOrElse ""
 
-  val TestAccessKey: String =
+  def TestAccessKey: String =
     scala.sys.env.get("REDSHIFT_ACCESS_KEY") getOrElse ""
 
-  val TestSecretKey: String =
+  def TestSecretKey: String =
     scala.sys.env.get("REDSHIFT_SECRET_KEY") getOrElse ""
 
-  val TestRegion: String =
+  def TestRegion: String =
     scala.sys.env.get("REDSHIFT_REGION") getOrElse ""
 
-  val User: String =
+  def User: String =
     scala.sys.env.get("REDSHIFT_USER") getOrElse ""
 
-  val Password: String =
+  def Password: String =
     scala.sys.env.get("REDSHIFT_PASSWORD") getOrElse ""
 
   def testsEnabled: Boolean =
