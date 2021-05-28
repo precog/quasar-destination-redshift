@@ -35,6 +35,7 @@ import quasar.blobstore.s3.{
 import quasar.blobstore.BlobstoreStatus
 import quasar.connector.MonadResourceErr
 import quasar.connector.destination.{Destination, DestinationModule, PushmiPullyu}
+import quasar.connector.render.RenderConfig
 import quasar.concurrent.NamedDaemonThreadFactory
 
 import argonaut._, Argonaut._
@@ -48,6 +49,7 @@ import doobie.free.connection.isValid
 import doobie.hikari.HikariTransactor
 import doobie.implicits._
 
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
 import scalaz.NonEmptyList
@@ -58,7 +60,9 @@ import software.amazon.awssdk.services.s3.S3AsyncClient
 
 
 object RedshiftDestinationModule extends DestinationModule {
-  val RedshiftDriverFqcn = "com.amazon.redshift.jdbc.Driver"
+  type InitErr = InitializationError[Json]
+
+  val RedshiftDriverFqcn = "com.amazon.redshift.jdbc42.Driver"
   val PoolSize = 10
   val PartSize = 10 * 1024 * 1024
   val LivenessTimeout = 60
@@ -75,10 +79,11 @@ object RedshiftDestinationModule extends DestinationModule {
   def destination[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
       config: Json,
       pushPull: PushmiPullyu[F])
-      : Resource[F, Either[InitializationError[Json], Destination[F]]] =
+      : Resource[F, Either[InitErr, Destination[F]]] =
     (for {
       cfg <- EitherT.fromEither[Resource[F, ?]](config.as[RedshiftConfig].result) leftMap {
-        case (err, _) => DestinationError.malformedConfiguration((destinationType, config, err))
+        case (err, _) =>
+          DestinationError.malformedConfiguration((destinationType, sanitizeDestinationConfig(config), err))
       }
 
       jdbcUri = cfg.connectionUri.toString
@@ -98,7 +103,7 @@ object RedshiftDestinationModule extends DestinationModule {
 
       uploadCfg = cfg.uploadBucket
 
-      client <- EitherT.right[InitializationError[Json]][Resource[F, ?], S3AsyncClient](
+      client <- EitherT.right[InitErr][Resource[F, ?], S3AsyncClient](
         s3Client[F](uploadCfg.accessKey, uploadCfg.secretKey, uploadCfg.region))
 
       _ <- EitherT(Resource.liftF(validDatabaseConnection[F](xa, config)))
@@ -111,6 +116,16 @@ object RedshiftDestinationModule extends DestinationModule {
       dest: Destination[F] = new RedshiftDestination[F](deleteService, putService, cfg, xa)
 
     } yield dest).value
+
+  val RedshiftRenderConfig = RenderConfig.Csv(
+      includeHeader = false,
+      includeBom = false,
+      offsetDateTimeFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ssx"),
+      // RedShift doesn't have time-only data types so we fake it by prepending an arbitrary date (1900-01-01)
+      offsetTimeFormat = DateTimeFormatter.ofPattern("'1900-01-01' HH:mm:ssx"),
+      localDateTimeFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss"),
+      localTimeFormat = DateTimeFormatter.ofPattern("'1900-01-01' HH:mm:ss"),
+      localDateFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd"))
 
   private def validDatabaseConnection[F[_]: Sync](xa: Transactor[F], config: Json)
       : F[Either[InitializationError[Json], Unit]] =
@@ -133,16 +148,16 @@ object RedshiftDestinationModule extends DestinationModule {
       case BlobstoreStatus.NotFound =>
         DestinationError
           .invalidConfiguration(
-            (destinationType, config, NonEmptyList("Upload bucket does not exist")))
+            (destinationType, sanitizeDestinationConfig(config), NonEmptyList("Upload bucket does not exist")))
           .asLeft
       case BlobstoreStatus.NoAccess =>
         DestinationError.accessDenied(
-          (destinationType, config, "Access denied to upload bucket"))
+          (destinationType, sanitizeDestinationConfig(config), "Access denied to upload bucket"))
           .asLeft
       case BlobstoreStatus.NotOk(msg) =>
         DestinationError
           .invalidConfiguration(
-            (destinationType, config, NonEmptyList(msg)))
+            (destinationType, sanitizeDestinationConfig(config), NonEmptyList(msg)))
           .asLeft
     }
 

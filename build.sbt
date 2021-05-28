@@ -44,13 +44,15 @@ lazy val core = project
       "org.tpolecat" %% "doobie-hikari" % DoobieVersion,
       "com.precog" %% "async-blobstore-core" % managedVersions.value("precog-async-blobstore"),
       "com.precog" %% "async-blobstore-s3" % managedVersions.value("precog-async-blobstore"),
-      "com.amazon.redshift" % "redshift-jdbc4-no-awssdk" % "1.2.10.1009"),
-    quasarPluginExtraResolvers := Seq(coursier.MavenRepository("https://s3.amazonaws.com/redshift-maven-repository/release")),
+      "com.amazon.redshift" % "redshift-jdbc42" % "1.2.43.1067"),
     performMavenCentralSync := false,
     publishAsOSSProject := false,
     libraryDependencies ++= Seq(
+      "com.github.tototoshi" %% "scala-csv" % "1.3.6" % Test,
       "org.specs2" %% "specs2-core" % SpecsVersion % Test,
       "com.precog" %% "quasar-foundation" % managedVersions.value("precog-quasar"),
       "com.precog" %% "quasar-foundation" % managedVersions.value("precog-quasar") % Test classifier "tests",
+      "com.precog" %% "quasar-foundation" % managedVersions.value("precog-quasar") % "test->test" classifier "tests",
+      "com.precog" %% "quasar-connector"  % managedVersions.value("precog-quasar"),
       "org.specs2" %% "specs2-scalacheck" % SpecsVersion % Test))
   .enablePlugins(AutomateHeaderPlugin, QuasarPlugin)
