@@ -250,13 +250,13 @@ object RedshiftFlow {
     tableName <- Resource.liftF(ensureValidTableName[F](args.path))
     writeModeRef <- Resource.liftF(Ref.of[F, WriteMode](args.writeMode))
   } yield {
-    val nameFragment = Fragment.const0(tableName)
+    val nameFragment = Fragment.const(tableName)
 
     val schemaFragment = config.schema.map(x => Fragment.const0(escape(x)))
 
     val tblFragment = schemaFragment match {
-      case None => nameFragment ++ fr0" "
-      case Some(s) => s ++ fr0"." ++ nameFragment ++ fr0" "
+      case None => nameFragment
+      case Some(s) => s ++ fr0"." ++ nameFragment
     }
     new RedshiftFlow(
       deleteService,
