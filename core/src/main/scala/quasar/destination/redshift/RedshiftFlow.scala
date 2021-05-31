@@ -52,7 +52,8 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
     deleteService: DeleteService[F],
     putService: PutService[F],
     config: RedshiftConfig,
-    name: String,
+    schemaFragment: Option[Fragment],
+    tblFragment: Fragment,
     xa: Transactor[F],
     writeModeRef: Ref[F, WriteMode],
     args: Flow.Args)
@@ -90,7 +91,7 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
 
     val deleteFromFragment =
       fr"DELETE FROM" ++
-      Fragment.const(name) ++
+      tblFragment ++
       fr"WHERE" ++
       Fragment.const(RedshiftFlow.escape(idCol.name))
 
@@ -157,7 +158,7 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
 
     val copyFragment: Authorization => Fragment = { a =>
       fr"COPY" ++
-      Fragment.const(name) ++
+      tblFragment ++
       columnsFragment ++
       fr"FROM" ++
       s3PathFragment ++
@@ -175,19 +176,25 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
     inp.replace("'", "")
 
   private def createNewTable(columns: NonEmptyList[Fragment]): ConnectionIO[Unit] = {
+    createSchemaIfNotExists >>
     dropTableIfExists >>
     createTable(columns)
   }
 
+  private def createSchemaIfNotExists: ConnectionIO[Unit] = schemaFragment traverse_ { (sfr: Fragment) =>
+    val fragment = fr"CREATE SCHEMA IF NOT EXISTS" ++ sfr
+    debug[ConnectionIO](s"CREATE SCHEMA QUERY: ${fragment.update.sql}") >>
+    fragment.update.run.void
+  }
   private def dropTableIfExists: ConnectionIO[Unit] = {
-    val fragment = fr"DROP TABLE IF EXISTS" ++ Fragment.const(name)
+    val fragment = fr"DROP TABLE IF EXISTS" ++ tblFragment
     debug[ConnectionIO](s"DROP QUERY: ${fragment.update.sql}") >>
     fragment.update.run.void
   }
 
   private def createTable(columns: NonEmptyList[Fragment]): ConnectionIO[Unit] = {
     val fragment =
-      fr"CREATE TABLE" ++ Fragment.const(name) ++ Fragments.parentheses(columns.intercalate(fr","))
+      fr"CREATE TABLE" ++ tblFragment ++ Fragments.parentheses(columns.intercalate(fr","))
     debug[ConnectionIO](s"CREATE QUERY: ${fragment.update.sql}") >>
     fragment.update.run.void
   }
@@ -242,7 +249,25 @@ object RedshiftFlow {
     xa <- rxa
     tableName <- Resource.liftF(ensureValidTableName[F](args.path))
     writeModeRef <- Resource.liftF(Ref.of[F, WriteMode](args.writeMode))
-  } yield new RedshiftFlow(deleteService, putService, config, tableName, xa, writeModeRef, args)
+  } yield {
+    val nameFragment = Fragment.const0(tableName)
+
+    val schemaFragment = config.schema.map(x => Fragment.const0(escape(x)))
+
+    val tblFragment = schemaFragment match {
+      case None => nameFragment ++ fr0" "
+      case Some(s) => s ++ fr0"." ++ nameFragment ++ fr0" "
+    }
+    new RedshiftFlow(
+      deleteService,
+      putService,
+      config,
+      schemaFragment,
+      tblFragment,
+      xa,
+      writeModeRef,
+      args)
+  }
 
   private def ensureValidTableName[F[_]: Applicative: MonadResourceErr](r: ResourcePath): F[String] = r match {
     case file /: ResourcePath.Root => escape(file).pure[F]

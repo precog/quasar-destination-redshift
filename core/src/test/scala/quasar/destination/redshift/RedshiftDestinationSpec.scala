@@ -162,8 +162,8 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
         }
     }
 
-    "upsert updates rows with string typed primary key on append" >>* {
-      Consumer.upsert[String :: String :: HNil](config(), TestConnectionUrl).use { consumer =>
+    "upsert updates rows with string typed primary key on append" >>
+      upsertOnly[String :: String :: HNil ] { consumer =>
         val events =
           Stream(
             UpsertEvent.Create(
@@ -192,10 +192,9 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
           Set(values2:_*) must_== Set("baz" :: "qux" :: HNil, "foo" :: "check0" :: HNil, "bar" :: "check1" :: HNil)
         }
       }
-    }
 
-    "upsert deletes rows with long typed primary key on append" >>* {
-      Consumer.upsert[Int :: String :: HNil](config(), TestConnectionUrl).use { consumer =>
+    "upsert deletes rows with long typed primary key on append" >>
+      upsertOnly[Int :: String :: HNil] { consumer =>
         val events =
           Stream(
             UpsertEvent.Create(
@@ -223,10 +222,9 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
           offsets2 must_== List(OffsetKey.Actual.string("commit2"))
         }
       }
-    }
 
-    "upsert empty deletes without failing" >>* {
-      Consumer.upsert[String :: String :: HNil](config(), TestConnectionUrl).use { consumer =>
+    "upsert empty deletes without failing" >>
+      upsertOnly[String :: String :: HNil] { consumer =>
         val events =
           Stream(
             UpsertEvent.Create(
@@ -250,7 +248,6 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
             OffsetKey.Actual.string("commit2"))
         }
       }
-    }
 
     "creates table and then appends" >> appendAndUpsert[String :: String :: HNil] { (toOpt, consumer) =>
       val events1 =
@@ -378,6 +375,19 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
         mustRoundtrip(("value" ->> s) :: HNil)
       }
     }
+
+    "create new schema if user-defined schema provided" >>* {
+      val schema = "myschema"
+
+      csv(config(schema = Some(schema))) { sink =>
+        val r1 = ("x" ->> 1) :: ("y" ->> "two") :: ("z" ->> "3.00001") :: HNil
+
+        for {
+          tbl <- freshTableName
+          res1 <- drainAndSelect(TestConnectionUrl, tbl, sink, Stream(r1), schema)
+        } yield (res1 must_=== List(r1))
+      }
+    }
   }
 
   val DM = RedshiftDestinationModule
@@ -430,6 +440,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
   def config(url: String = TestConnectionUrl, schema: Option[String] = None): Json =
     ("jdbcUri" := url) ->:
+    ("schema" := schema) ->:
     ("bucket" :=
       ("bucket" := TestBucket) ->:
         ("accessKey" := TestAccessKey) ->:
@@ -504,7 +515,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
   }
 
   object Consumer {
-    def upsert[A](cfg: Json, connectionUri: String): Resource[IO, Consumer[A]] = {
+    def upsert[A](cfg: Json, connectionUri: String, schema: String = "public"): Resource[IO, Consumer[A]] = {
       val rsink: Resource[IO, ResultSink.UpsertSink[IO, ColumnType.Scalar, Byte]] =
         DM.destination[IO](cfg, _ => _ => Stream.empty) evalMap {
           case Left(err) =>
@@ -531,7 +542,13 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
             ktl: ToList[K, String],
             vtl: ToList[S, String],
             ttl: ToList[T, ColumnType.Scalar])
-            : IO[(List[A], List[OffsetKey.Actual[String]])] =
+            : IO[(List[A], List[OffsetKey.Actual[String]])] = {
+
+        val createSchema = fr"CREATE SCHEMA IF NOT EXISTS" ++
+          Fragment.const(hygienicIdent(schema))
+
+        val tblFragment = Fragment.const0(hygienicIdent(schema)) ++ fr0"." ++ Fragment.const(hygienicIdent(table))
+
         for {
           tableColumns <- columnsOf(records, renderRow, idColumn).compile.lastOrError
 
@@ -540,18 +557,20 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
           dst = ResourcePath.root() / ResourceName(table)
 
+          _ <- runDb[IO, Int](createSchema.update.run, connectionUri)
+
           offsets <- toUpsertCsvSink(
             dst, sink, idColumn.get, writeMode, renderRow, records).compile.toList
 
-          q = fr"SELECT" ++ colList ++ fr"FROM" ++ Fragment.const(hygienicIdent(table))
+          q = fr"SELECT" ++ colList ++ fr"FROM" ++ tblFragment
 
           rows <- runDb[IO, List[A]](q.query[A].to[List], connectionUri)
 
         } yield (rows, offsets)
-      }}
+      }}}
     }
 
-    def append[A](cfg: Json, connectionUri: String): Resource[IO, Consumer[A]] = {
+    def append[A](cfg: Json, connectionUri: String, schema: String = "public"): Resource[IO, Consumer[A]] = {
       val rsink: Resource[IO, ResultSink.AppendSink[IO, ColumnType.Scalar]] =
         DM.destination[IO](cfg, _ => _ => Stream.empty) evalMap {
           case Left(err) =>
@@ -578,7 +597,13 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
             ktl: ToList[K, String],
             vtl: ToList[S, String],
             ttl: ToList[T, ColumnType.Scalar])
-            : IO[(List[A], List[OffsetKey.Actual[String]])] =
+            : IO[(List[A], List[OffsetKey.Actual[String]])] = {
+
+        val createSchema = fr"CREATE SCHEMA IF NOT EXISTS" ++
+          Fragment.const(hygienicIdent(schema))
+
+        val tblFragment = Fragment.const0(hygienicIdent(schema)) ++ fr0"." ++ Fragment.const(hygienicIdent(table))
+
         for {
           tableColumns <- columnsOf(records, renderRow, idColumn).compile.lastOrError
 
@@ -587,18 +612,32 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
           dst = ResourcePath.root() / ResourceName(table)
 
+          _ <- runDb[IO, Int](createSchema.update.run, connectionUri)
+
           offsets <- toAppendCsvSink(
             dst, sink, idColumn, writeMode, renderRow, records).compile.toList
 
-          q = fr"SELECT" ++ colList ++ fr"FROM" ++ Fragment.const(hygienicIdent(table))
+          q = fr"SELECT" ++ colList ++ fr"FROM" ++ tblFragment
 
           rows <- runDb[IO, List[A]](q.query[A].to[List], connectionUri)
 
         } yield (rows, offsets)
       }
-    }}
+    }}}
   }
 
+  object upsertOnly {
+    def apply[A]: PartiallyApplied[A] = new PartiallyApplied[A]
+
+    final class PartiallyApplied[A] {
+      def apply[R: AsResult](f: Consumer[A] => IO[R]): SFragment = {
+        "upsert" >>*
+          Consumer.upsert[A](config(), TestConnectionUrl).use(f)
+        "upsert custom schema" >>*
+          Consumer.upsert[A](config(schema = "myschema".some), TestConnectionUrl, schema = "myschema").use(f)
+      }
+    }
+  }
   object appendAndUpsert {
     def apply[A]: PartiallyApplied[A] = new PartiallyApplied[A]
 
@@ -607,9 +646,18 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       def apply[R: AsResult](
           f: (MkOption, Consumer[A]) => IO[R])
           : SFragment = {
-        "upsert" >>* Consumer.upsert[A](config(), TestConnectionUrl).use(f(Some(_), _))
-        "append" >>* Consumer.append[A](config(), TestConnectionUrl).use(f(Some(_), _))
-        "no-id" >>* Consumer.append[A](config(), TestConnectionUrl).use(f(x => None, _))
+        "upsert" >>*
+          Consumer.upsert[A](config(), TestConnectionUrl).use(f(Some(_), _))
+        "upsert custom schema" >>*
+          Consumer.upsert[A](config(schema = "myschema".some), TestConnectionUrl, schema = "myschema").use(f(Some(_), _))
+        "append" >>*
+          Consumer.append[A](config(), TestConnectionUrl).use(f(Some(_), _))
+        "append custom schema" >>*
+          Consumer.append[A](config(schema = "myschema".some), TestConnectionUrl, schema = "myschema").use(f(Some(_), _))
+        "no-id" >>*
+          Consumer.append[A](config(), TestConnectionUrl).use(f(x => None, _))
+        "no-id custom schema" >>*
+          Consumer.append[A](config(schema = "myschema".some), TestConnectionUrl, schema = "myschema").use(f(x => None, _))
       }
     }
   }
@@ -622,8 +670,14 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       def apply[R: AsResult](
           f: (MkOption, Consumer[A]) => IO[R])
           : SFragment = {
-        "upsert" >>* Consumer.upsert[A](config(), TestConnectionUrl).use(f(Some(_), _))
-        "append" >>* Consumer.append[A](config(), TestConnectionUrl).use(f(Some(_), _))
+        "upsert" >>*
+          Consumer.upsert[A](config(), TestConnectionUrl).use(f(Some(_), _))
+        "upsert custom schema" >>*
+          Consumer.upsert[A](config(schema = "myschema".some), TestConnectionUrl, schema = "myschema").use(f(Some(_), _))
+        "append" >>*
+          Consumer.append[A](config(), TestConnectionUrl).use(f(Some(_), _))
+        "append custom schema" >>*
+          Consumer.append[A](config(schema = "myschema".some), TestConnectionUrl, schema = "myschema").use(f(Some(_), _))
       }
     }
   }
