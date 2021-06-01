@@ -32,7 +32,7 @@ import java.io.ByteArrayOutputStream
 import java.time._
 
 import qdata.time._
-import quasar.api.{Column, ColumnType}
+import quasar.api.Column
 import quasar.api.resource.ResourcePath
 import quasar.api.push.{PushColumns, OffsetKey}
 import quasar.connector.{AppendEvent, IdBatch, DataEvent}
@@ -78,7 +78,7 @@ trait CsvSupport {
   // TODO: handle includeHeader == true
   def toCsvSink[F[_]: ApplicativeError[?[_], Throwable], P <: Poly1, R <: HList, K <: HList, V <: HList, T <: HList, S <: HList](
       dst: ResourcePath,
-      sink: ResultSink.CreateSink[F, ColumnType.Scalar, Byte],
+      sink: ResultSink.CreateSink[F, RedshiftType, Byte],
       renderRow: P,
       records: Stream[F, R])(
       implicit
@@ -88,14 +88,14 @@ trait CsvSupport {
       renderValues: Mapper.Aux[renderRow.type, V, S],
       ktl: ToList[K, String],
       stl: ToList[S, String],
-      ttl: ToList[T, ColumnType.Scalar])
+      ttl: ToList[T, RedshiftType])
       : Stream[F, Unit] = {
 
     val go = records.pull.peek1 flatMap {
       case Some((r, rs)) =>
         val rkeys = r.keys.toList
         val rtypes = r.values.map(asColumnType).toList
-        val columns = rkeys.zip(rtypes).map((Column[ColumnType.Scalar] _).tupled)
+        val columns = rkeys.zip(rtypes).map((Column[RedshiftType] _).tupled)
         val encoded = rs.through(encodeCsvRecords[F, renderRow.type, R, V, S](renderRow))
 
         encoded.through(sink.consume(dst, NonEmptyList.fromListUnsafe(columns))._2).pull.echo
@@ -110,20 +110,20 @@ trait CsvSupport {
     F[_]: Async, P <: Poly1, R <: HList, K <: HList, V <: HList, T <: HList, S <: HList](
     events: Stream[F, UpsertEvent[R]],
     renderRow: P,
-    idColumn: Option[Column[ColumnType.Scalar]])(
+    idColumn: Option[Column[RedshiftType]])(
     implicit
     keys: Keys.Aux[R, K],
     values: Values.Aux[R, V],
     getTypes: Mapper.Aux[asColumnType.type, V, T],
     ktl: ToList[K, String],
-    ttl: ToList[T, ColumnType.Scalar])
-    : Stream[F, List[Column[ColumnType.Scalar]]] = {
-    def go(inp: Stream[F, UpsertEvent[R]]): Pull[F, List[Column[ColumnType.Scalar]], Unit] = inp.pull.uncons1 flatMap {
+    ttl: ToList[T, RedshiftType])
+    : Stream[F, List[Column[RedshiftType]]] = {
+    def go(inp: Stream[F, UpsertEvent[R]]): Pull[F, List[Column[RedshiftType]], Unit] = inp.pull.uncons1 flatMap {
       case Some((UpsertEvent.Create(records), tail)) => records.headOption match {
         case Some(r) =>
           val rkeys = r.keys.toList
           val rtypes = r.values.map(asColumnType).toList
-          val columns = rkeys.zip(rtypes).map((Column[ColumnType.Scalar] _).tupled)
+          val columns = rkeys.zip(rtypes).map((Column[RedshiftType] _).tupled)
           Pull.output1(columns.filter(c => c.some =!= idColumn)) >> Pull.done
         case None =>
           Pull.done
@@ -139,8 +139,8 @@ trait CsvSupport {
 
   def toAppendCsvSink[F[_]: Async, P <: Poly1, R <: HList, K <: HList, V <: HList, T <: HList, S <: HList](
       dst: ResourcePath,
-      sink: ResultSink.AppendSink[F, ColumnType.Scalar],
-      idColumn: Option[Column[ColumnType.Scalar]],
+      sink: ResultSink.AppendSink[F, RedshiftType],
+      idColumn: Option[Column[RedshiftType]],
       writeMode: QWriteMode,
       renderRow: P,
       events: Stream[F, UpsertEvent[R]])(
@@ -151,7 +151,7 @@ trait CsvSupport {
       renderValues: Mapper.Aux[renderRow.type, V, S],
       ktl: ToList[K, String],
       stl: ToList[S, String],
-      ttl: ToList[T, ColumnType.Scalar])
+      ttl: ToList[T, RedshiftType])
       : Stream[F, OffsetKey.Actual[String]] = {
 
     val encoded: Stream[F, AppendEvent[Byte, OffsetKey.Actual[String]]] = events flatMap {
@@ -186,8 +186,8 @@ trait CsvSupport {
 
   def toUpsertCsvSink[F[_]: Async, P <: Poly1, R <: HList, K <: HList, V <: HList, T <: HList, S <: HList](
       dst: ResourcePath,
-      sink: ResultSink.UpsertSink[F, ColumnType.Scalar, Byte],
-      idColumn: Column[ColumnType.Scalar],
+      sink: ResultSink.UpsertSink[F, RedshiftType, Byte],
+      idColumn: Column[RedshiftType],
       writeMode: QWriteMode,
       renderRow: P,
       events: Stream[F, UpsertEvent[R]])(
@@ -198,7 +198,7 @@ trait CsvSupport {
       renderValues: Mapper.Aux[renderRow.type, V, S],
       ktl: ToList[K, String],
       stl: ToList[S, String],
-      ttl: ToList[T, ColumnType.Scalar])
+      ttl: ToList[T, RedshiftType])
       : Stream[F, OffsetKey.Actual[String]] = {
 
     val encoded: Stream[F, DataEvent[Byte, OffsetKey.Actual[String]]] = events flatMap {
@@ -276,28 +276,25 @@ trait CsvSupport {
   }
 
   object asColumnType extends Poly1 {
-    implicit val boolCase = at[Boolean](_ => ColumnType.Boolean)
+    implicit val boolCase = at[Boolean](_ => RedshiftType.BOOL)
 
-    implicit val localTimeCase = at[LocalTime](_ => ColumnType.LocalTime)
-    implicit val offsetTimeCase = at[OffsetTime](_ => ColumnType.OffsetTime)
+    implicit val localTimeCase = at[LocalTime](_ => RedshiftType.TIME)
+    implicit val offsetTimeCase = at[OffsetTime](_ => RedshiftType.TIMETZ)
 
-    implicit val localDateCase = at[LocalDate](_ => ColumnType.LocalDate)
-    implicit val offsetDateCase = at[OffsetDate](_ => ColumnType.OffsetDate)
+    implicit val localDateCase = at[LocalDate](_ => RedshiftType.DATE)
 
-    implicit val localDateTimeCase = at[LocalDateTime](_ => ColumnType.LocalDateTime)
-    implicit val offsetDateTimeCase = at[OffsetDateTime](_ => ColumnType.OffsetDateTime)
+    implicit val localDateTimeCase = at[LocalDateTime](_ => RedshiftType.TIMESTAMP)
+    implicit val offsetDateTimeCase = at[OffsetDateTime](_ => RedshiftType.TIMESTAMPTZ)
 
-    implicit val dateTimeIntervalCase = at[DateTimeInterval](_ => ColumnType.Interval)
+    implicit val shortCase = at[Short](_ => RedshiftType.SMALLINT)
+    implicit val intCase = at[Int](_ => RedshiftType.INTEGER)
+    implicit val longCase = at[Long](_ => RedshiftType.BIGINT)
+    implicit val floatCase = at[Float](_ => RedshiftType.FLOAT4)
+    implicit val doubleCase = at[Double](_ => RedshiftType.FLOAT)
+    implicit val bigDecCase = at[BigDecimal](_ => RedshiftType.DECIMAL(21, 6))
 
-    implicit val shortCase = at[Short](_ => ColumnType.Number)
-    implicit val intCase = at[Int](_ => ColumnType.Number)
-    implicit val longCase = at[Long](_ => ColumnType.Number)
-    implicit val floatCase = at[Float](_ => ColumnType.Number)
-    implicit val doubleCase = at[Double](_ => ColumnType.Number)
-    implicit val bigDecCase = at[BigDecimal](_ => ColumnType.Number)
-
-    implicit val charCase = at[Char](_ => ColumnType.String)
-    implicit val stringCase = at[String](_ => ColumnType.String)
+    implicit val charCase = at[Char](_ => RedshiftType.VARCHAR(1))
+    implicit val stringCase = at[String](_ => RedshiftType.VARCHAR(512))
   }
 
   ////

@@ -18,7 +18,7 @@ package quasar.destination.redshift
 
 import slamdata.Predef._
 
-import quasar.api.{Column, ColumnType}
+import quasar.api.Column
 import quasar.api.resource._
 import quasar.blobstore.paths.{BlobPath, PathElem}
 import quasar.blobstore.s3.{
@@ -32,7 +32,7 @@ import quasar.connector._
 import quasar.connector.destination.WriteMode
 
 import cats.Applicative
-import cats.data.{NonEmptyList, ValidatedNel}
+import cats.data.NonEmptyList
 import cats.effect._
 import cats.effect.concurrent.Ref
 import cats.implicits._
@@ -110,16 +110,13 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
 
   def ingest: Pipe[F, Byte, Unit] = { inp =>
     Stream.resource {
+      val colFragments = args.columns map mkColumn
       for {
-        cols <- Resource.liftF { args.columns.traverse(mkColumn).fold(
-          invalid => Sync[F].raiseError(ColumnTypesNotSupported(invalid)),
-          _.pure[F])
-        }
         uploaded <- stageFile(inp)
         writeMode <- Resource.liftF(writeModeRef.get)
         _ <- writeMode match {
           case WriteMode.Replace => Resource.liftF {
-            createNewTable(cols).transact(xa) >>
+            createNewTable(colFragments).transact(xa) >>
             writeModeRef.set(WriteMode.Append)
           }
           case WriteMode.Append => ().pure[Resource[F, *]]
@@ -212,25 +209,8 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
     Resource.make(make)(deleteService(_).void)
   }
 
-  private def mkColumn(c: Column[ColumnType.Scalar])
-      : ValidatedNel[ColumnType.Scalar, Fragment] =
-    columnTypeToRedshift(c.tpe).map(Fragment.const(RedshiftFlow.escape(c.name)) ++ _)
-
-  private def columnTypeToRedshift(ct: ColumnType.Scalar)
-      : ValidatedNel[ColumnType.Scalar, Fragment] =
-    ct match {
-      case ColumnType.Null => fr0"SMALLINT".validNel
-      case ColumnType.Boolean => fr0"BOOLEAN".validNel
-      case lt @ ColumnType.LocalTime => fr0"TIMESTAMP".validNel
-      case ot @ ColumnType.OffsetTime => fr0"TIMESTAMPTZ".validNel
-      case ColumnType.LocalDate => fr0"DATE".validNel
-      case od @ ColumnType.OffsetDate => od.invalidNel
-      case ColumnType.LocalDateTime => fr0"TIMESTAMP".validNel
-      case ColumnType.OffsetDateTime => fr0"TIMESTAMPTZ".validNel
-      case i @ ColumnType.Interval => i.invalidNel
-      case ColumnType.Number => fr0"DECIMAL(21, 6)".validNel
-      case ColumnType.String => fr0"VARCHAR(4096)".validNel
-    }
+  private def mkColumn(c: Column[RedshiftType]): Fragment =
+    Fragment.const(RedshiftFlow.escape(c.name)) ++ c.tpe.asSql
 
   private def debug[G[_]: Sync](msg: String): G[Unit] =
     Sync[G].delay(log.debug(msg))
