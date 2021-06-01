@@ -16,6 +16,8 @@
 
 package quasar.destination.redshift
 
+import slamdata.Predef._
+
 import quasar.blobstore.s3.{AccessKey, Bucket, Region, SecretKey}
 
 import argonaut._, Argonaut._
@@ -27,16 +29,19 @@ import org.specs2.mutable.Specification
 object RedshiftConfigSpec extends Specification {
   val jdbcUri = "jdbc:redshift://redshift-cluster-1.example.outer-space.redshift.amazonaws.com:5439/dev"
 
-  val common =
+  val woSchema =
     Json.obj(
-      "bucket":= Json.obj(
-        "bucket":= "foobarbucket",
-        "accessKey":= "access key",
-        "secretKey":= "secret key",
-        "region":= "outer-space"),
-      "jdbcUri":= jdbcUri,
-      "user":= "awsuser",
-      "password":= "super secret password")
+      "bucket" := Json.obj(
+        "bucket" := "foobarbucket",
+        "accessKey" := "access key",
+        "secretKey" := "secret key",
+        "region" := "outer-space"),
+      "jdbcUri" := jdbcUri,
+      "user" := "awsuser",
+      "password" := "super secret password")
+
+  val common =
+    woSchema.withObject(_ + ("schema", "my-schema".asJson))
 
   val roleAuth =
     Json.obj(
@@ -64,6 +69,7 @@ object RedshiftConfigSpec extends Specification {
             "accessKey":= "access key",
             "secretKey":= "<REDACTED>",
             "region":= "outer-space"),
+          "schema" := "my-schema",
           "jdbcUri":= jdbcUri,
           "user":= "awsuser",
           "password":= "<REDACTED>",
@@ -84,6 +90,7 @@ object RedshiftConfigSpec extends Specification {
             "accessKey":= "access key",
             "secretKey":= "<REDACTED>",
             "region":= "outer-space"),
+          "schema" := "my-schema",
           "jdbcUri":= jdbcUri,
           "user":= "awsuser",
           "password":= "<REDACTED>",
@@ -110,7 +117,8 @@ object RedshiftConfigSpec extends Specification {
           Password("super secret password"),
           Authorization.RoleARN(
             "arn:aws:iam::account-id:role/test-role",
-            Region("outer-space"))))
+            Region("outer-space")),
+          Some("my-schema")))
     }
 
     "with key authorization" >> {
@@ -130,7 +138,27 @@ object RedshiftConfigSpec extends Specification {
           Authorization.Keys(
             AccessKey("access key"),
             SecretKey("secret key"),
-            Region("outer-space"))))
+            Region("outer-space")),
+          Some("my-schema")))
+    }
+    "without schema" >> {
+      val testConfig =
+        woSchema.withObject(_ + ("authorization", roleAuth))
+
+      testConfig.as[RedshiftConfig].result must beRight(
+        RedshiftConfig(
+          BucketConfig(
+            Bucket("foobarbucket"),
+            AccessKey("access key"),
+            SecretKey("secret key"),
+            Region("outer-space")),
+          new URI(jdbcUri),
+          User("awsuser"),
+          Password("super secret password"),
+          Authorization.RoleARN(
+            "arn:aws:iam::account-id:role/test-role",
+            Region("outer-space")),
+          None))
     }
   }
 }

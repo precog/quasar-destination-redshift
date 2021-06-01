@@ -53,7 +53,8 @@ final case class RedshiftConfig(
   connectionUri: URI,
   user: User,
   password: Password,
-  authorization: Authorization)
+  authorization: Authorization,
+  schema: Option[String])
 
 object RedshiftConfig {
   private implicit val uriCodecJson: CodecJson[URI] =
@@ -105,9 +106,15 @@ object RedshiftConfig {
     } yield res))
 
   implicit val redshiftConfigCodecJson: CodecJson[RedshiftConfig] =
-    casecodec5[BucketConfig, URI, String, String, Authorization, RedshiftConfig](
-      (bucketConfig, uri, user, password, auth) =>
-        RedshiftConfig(bucketConfig, uri, User(user), Password(password), auth),
-      rsc => (rsc.uploadBucket, rsc.connectionUri, rsc.user.value, rsc.password.value, rsc.authorization).some)(
-      "bucket", "jdbcUri", "user", "password", "authorization")
+    casecodec6[BucketConfig, URI, String, String, Authorization, Option[String], RedshiftConfig](
+      (bucketConfig, uri, user, password, auth, schema) =>
+        RedshiftConfig(bucketConfig, uri, User(user), Password(password), auth, schema),
+      rsc =>
+        (rsc.uploadBucket,
+          rsc.connectionUri,
+          rsc.user.value,
+          rsc.password.value,
+          rsc.authorization,
+          rsc.schema).some)(
+      "bucket", "jdbcUri", "user", "password", "authorization", "schema")
 }
