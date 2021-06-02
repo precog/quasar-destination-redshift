@@ -18,7 +18,7 @@ package quasar.destination.redshift
 
 import slamdata.Predef._
 
-import quasar.api.{Column, ColumnType}
+import quasar.api.Column
 import quasar.api.push.OffsetKey
 import quasar.api.resource._
 import quasar.connector._
@@ -39,7 +39,7 @@ private[redshift] trait Flow[F[_]] {
 }
 
 object Flow {
-  private type FlowColumn = Column[ColumnType.Scalar]
+  private type FlowColumn = Column[RedshiftType]
 
   sealed trait Args {
     def path: ResourcePath
@@ -56,14 +56,14 @@ object Flow {
       def idColumn = None
     }
 
-    def ofUpsert(args: UpsertSink.Args[ColumnType.Scalar]): Args = new Args {
+    def ofUpsert(args: UpsertSink.Args[RedshiftType]): Args = new Args {
       def path = args.path
       def columns = args.columns
       def writeMode = args.writeMode
       def idColumn = args.idColumn.some
     }
 
-    def ofAppend(args: AppendSink.Args[ColumnType.Scalar]): Args = new Args {
+    def ofAppend(args: AppendSink.Args[RedshiftType]): Args = new Args {
       def path = args.path
       def columns = args.columns
       def writeMode = args.writeMode
@@ -80,7 +80,7 @@ object Flow {
 
     val render: RenderConfig[Byte]
 
-    def flowSinks(implicit F: Concurrent[F]): NonEmptyList[ResultSink[F, ColumnType.Scalar]] =
+    def flowSinks(implicit F: Concurrent[F]): NonEmptyList[ResultSink[F, RedshiftType]] =
       NonEmptyList.of(ResultSink.create(create), ResultSink.upsert(upsert), ResultSink.append(append))
 
     private def create(path: ResourcePath, cols: NonEmptyList[FlowColumn])
@@ -92,14 +92,14 @@ object Flow {
       } yield ())
     }
 
-    private def upsert(upsertArgs: UpsertSink.Args[ColumnType.Scalar])(implicit F: Concurrent[F])
+    private def upsert(upsertArgs: UpsertSink.Args[RedshiftType])(implicit F: Concurrent[F])
         : (RenderConfig[Byte], ∀[Consume[DataEvent[Byte, *], *]]) = {
       val args = Args.ofUpsert(upsertArgs)
       val consume = ∀[Consume[DataEvent[Byte, *], *]](upsertPipe(args))
       (render, consume)
     }
 
-    private def append(appendArgs: AppendSink.Args[ColumnType.Scalar])(implicit F: Concurrent[F])
+    private def append(appendArgs: AppendSink.Args[RedshiftType])(implicit F: Concurrent[F])
         : (RenderConfig[Byte], ∀[Consume[AppendEvent[Byte, *], *]]) = {
       val args = Args.ofAppend(appendArgs)
       val consume = ∀[Consume[AppendEvent[Byte, *], *]](upsertPipe(args))

@@ -36,10 +36,8 @@ import org.specs2.matcher.MatchResult
 import org.specs2.execute.AsResult
 import org.specs2.specification.core.{Fragment => SFragment}
 
-import qdata.time._
-
 import quasar.EffectfulQSpec
-import quasar.api.{Column, ColumnType}
+import quasar.api.Column
 import quasar.api.destination._
 import quasar.api.push.OffsetKey
 import quasar.api.resource._
@@ -96,7 +94,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
       for {
         tbl <- freshTableName
-        (values, offsets) <- consumer(tbl, toOpt(Column("x", ColumnType.String)), WriteMode.Replace, events)
+        (values, offsets) <- consumer(tbl, toOpt(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events)
         } yield {
           values must_== List(
             "foo" :: "bar" :: HNil,
@@ -115,7 +113,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
       for {
         tbl <- freshTableName
-        (values, offsets) <- consumer(tbl, toOpt(Column("x", ColumnType.String)), WriteMode.Replace, events)
+        (values, offsets) <- consumer(tbl, toOpt(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events)
         } yield {
           values must_== List(
             "foo" :: "bar" :: HNil,
@@ -135,7 +133,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 //
 //      for {
 //        tbl <- freshTableName
-//        (values, offsets) <- consumer(tbl, toOpt(Column("x", ColumnType.String)), WriteMode.Replace, events)
+//        (values, offsets) <- consumer(tbl, toOpt(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events)
 //        } yield {
 //          values must_== List(
 //            "foo" :: "bar" :: HNil,
@@ -153,7 +151,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
       for {
         tbl <- freshTableName
-        (values, offsets) <- consumer(tbl, toOpt(Column("x", ColumnType.String)), WriteMode.Replace, events)
+        (values, offsets) <- consumer(tbl, toOpt(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events)
         } yield {
           values must_== List("foo" :: "bar" :: HNil)
           offsets must_== List(
@@ -183,8 +181,8 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
         for {
           tbl <- freshTableName
-          (values1, offsets1) <- consumer(tbl, Some(Column("x", ColumnType.String)), WriteMode.Replace, events)
-          (values2, offsets2) <- consumer(tbl, Some(Column("x", ColumnType.String)), WriteMode.Append, append)
+          (values1, offsets1) <- consumer(tbl, Some(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events)
+          (values2, offsets2) <- consumer(tbl, Some(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Append, append)
         } yield {
           offsets1 must_== List(OffsetKey.Actual.string("commit1"))
           offsets2 must_== List(OffsetKey.Actual.string("commit2"))
@@ -213,8 +211,8 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
         for {
           tbl <- freshTableName
-          (values1, offsets1) <- consumer(tbl, Some(Column("x", ColumnType.Number)), WriteMode.Replace, events)
-          (values2, offsets2) <- consumer(tbl, Some(Column("x", ColumnType.Number)), WriteMode.Append, append)
+          (values1, offsets1) <- consumer(tbl, Some(Column("x", RedshiftType.INTEGER)), WriteMode.Replace, events)
+          (values2, offsets2) <- consumer(tbl, Some(Column("x", RedshiftType.INTEGER)), WriteMode.Append, append)
         } yield {
           Set(values1:_*) must_== Set(40 :: "bar" :: HNil, 42 :: "qux" :: HNil)
           Set(values2:_*) must_== Set(40 :: "check" :: HNil, 42 :: "qux" :: HNil)
@@ -237,7 +235,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
         for {
           tbl <- freshTableName
-          (values, offsets) <- consumer(tbl, Some(Column("x", ColumnType.String)), WriteMode.Replace, events)
+          (values, offsets) <- consumer(tbl, Some(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events)
         } yield {
           values must_== List(
             "foo" :: "bar" :: HNil,
@@ -263,9 +261,9 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       for {
         tbl <- freshTableName
 
-        _ <- consumer(tbl, toOpt(Column("x", ColumnType.String)), WriteMode.Replace, events1)
+        _ <- consumer(tbl, toOpt(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events1)
 
-        (values, _) <- consumer(tbl, Some(Column("x", ColumnType.String)), WriteMode.Append, events2)
+        (values, _) <- consumer(tbl, Some(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Append, events2)
         } yield {
           values must_== List(
             "foo" :: "bar" :: HNil,
@@ -278,7 +276,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
     "reject empty paths with NotAResource" >>* {
       csv(config()) { sink =>
         val p = ResourcePath.root()
-        val (_, pipe) = sink.consume(p, NonEmptyList.one(Column("a", ColumnType.Boolean)))
+        val (_, pipe) = sink.consume(p, NonEmptyList.one(Column("a", RedshiftType.BOOL)))
         val r = pipe(Stream.empty).compile.drain
 
         MRE.attempt(r).map(_ must beLike {
@@ -290,28 +288,12 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
     "reject paths with > 1 segments with NotAResource" >>* {
       csv(config()) { sink =>
         val p = ResourcePath.root() / ResourceName("foo") / ResourceName("bar")
-        val (_, pipe) = sink.consume(p, NonEmptyList.one(Column("a", ColumnType.Boolean)))
+        val (_, pipe) = sink.consume(p, NonEmptyList.one(Column("a", RedshiftType.BOOL)))
         val r = pipe(Stream.empty).compile.drain
 
         MRE.attempt(r).map(_ must beLike {
           case -\/(ResourceError.NotAResource(p2)) => p2 must_=== p
         })
-      }
-    }
-
-    "reject OffsetDate columns" >>* {
-      val MinOffsetDate = OffsetDate(LocalDate.MIN, ZoneOffset.MIN)
-      val MaxOffsetDate = OffsetDate(LocalDate.MAX, ZoneOffset.MAX)
-
-      freshTableName flatMap { table =>
-        val cfg = config(url = TestConnectionUrl)
-        val rs = Stream(("min" ->> MinOffsetDate) :: ("max" ->> MaxOffsetDate) :: HNil)
-
-        csv(cfg)(drainAndSelectAs[IO, String :: String :: HNil](TestConnectionUrl, table, _, rs))
-          .attempt
-          .map(_ must beLeft.like {
-            case ColumnTypesNotSupported(ts) => ts.toList must contain(ColumnType.OffsetDate: ColumnType)
-          })
       }
     }
 
@@ -457,7 +439,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       jEmptyObject) ->:
     jEmptyObject
 
-  def csv[A](cfg: Json)(f: ResultSink.CreateSink[IO, ColumnType.Scalar, Byte] => IO[A]): IO[A] =
+  def csv[A](cfg: Json)(f: ResultSink.CreateSink[IO, RedshiftType, Byte] => IO[A]): IO[A] =
     dest(cfg) {
       case Left(err) =>
         IO.raiseError(new RuntimeException(err.shows))
@@ -465,11 +447,11 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       case Right(dst) =>
         dst.sinks.toList
           .collectFirst { case c @ ResultSink.CreateSink(_) => c }
-          .map(s => f(s.asInstanceOf[ResultSink.CreateSink[IO, ColumnType.Scalar, Byte]]))
+          .map(s => f(s.asInstanceOf[ResultSink.CreateSink[IO, RedshiftType, Byte]]))
           .getOrElse(IO.raiseError(new RuntimeException("No CSV sink found!")))
     }
 
-  def upsertCsv[A](cfg: Json)(f: ResultSink.UpsertSink[IO, ColumnType.Scalar, Byte] => IO[A]): IO[A] =
+  def upsertCsv[A](cfg: Json)(f: ResultSink.UpsertSink[IO, RedshiftType, Byte] => IO[A]): IO[A] =
     dest(cfg) {
       case Left(err) =>
         IO.raiseError(new RuntimeException(err.shows))
@@ -477,11 +459,11 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       case Right(dst) =>
         dst.sinks.toList
           .collectFirst { case c @ ResultSink.UpsertSink(_) => c }
-          .map(s => f(s.asInstanceOf[ResultSink.UpsertSink[IO, ColumnType.Scalar, Byte]]))
+          .map(s => f(s.asInstanceOf[ResultSink.UpsertSink[IO, RedshiftType, Byte]]))
           .getOrElse(IO.raiseError(new RuntimeException("No upsert CSV sink found!")))
     }
 
-  def appendSink[A](cfg: Json)(f: ResultSink.AppendSink[IO, ColumnType.Scalar] => IO[A]): IO[A] =
+  def appendSink[A](cfg: Json)(f: ResultSink.AppendSink[IO, RedshiftType] => IO[A]): IO[A] =
     dest(cfg) {
       case Left(err) =>
         IO.raiseError(new RuntimeException(err.shows))
@@ -489,7 +471,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       case Right(dst) =>
         dst.sinks.toList
           .collectFirst { case c @ ResultSink.AppendSink(_) => c }
-          .map(s => f(s.asInstanceOf[ResultSink.AppendSink[IO, ColumnType.Scalar]]))
+          .map(s => f(s.asInstanceOf[ResultSink.AppendSink[IO, RedshiftType]]))
           .getOrElse(IO.raiseError(new RuntimeException("No append CSV sink found!")))
     }
 
@@ -499,7 +481,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
   trait Consumer[A]{
     def apply[R <: HList, K <: HList, V <: HList, T <: HList, S <: HList](
         table: String,
-        idColumn: Option[Column[ColumnType.Scalar]],
+        idColumn: Option[Column[RedshiftType]],
         writeMode: WriteMode,
         records: Stream[IO, UpsertEvent[R]])(
         implicit
@@ -510,27 +492,27 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
         rrow: Mapper.Aux[renderRow.type, V, S],
         ktl: ToList[K, String],
         vtl: ToList[S, String],
-        ttl: ToList[T, ColumnType.Scalar])
+        ttl: ToList[T, RedshiftType])
         : IO[(List[A], List[OffsetKey.Actual[String]])]
   }
 
   object Consumer {
     def upsert[A](cfg: Json, connectionUri: String, schema: String = "public"): Resource[IO, Consumer[A]] = {
-      val rsink: Resource[IO, ResultSink.UpsertSink[IO, ColumnType.Scalar, Byte]] =
+      val rsink: Resource[IO, ResultSink.UpsertSink[IO, RedshiftType, Byte]] =
         DM.destination[IO](cfg, _ => _ => Stream.empty) evalMap {
           case Left(err) =>
             IO.raiseError(new RuntimeException(err.shows))
           case Right(dst) =>
             val optSink = dst.sinks.toList.collectFirst { case c @ ResultSink.UpsertSink(_) => c }
             optSink match {
-              case Some(s) => s.asInstanceOf[ResultSink.UpsertSink[IO, ColumnType.Scalar, Byte]].pure[IO]
+              case Some(s) => s.asInstanceOf[ResultSink.UpsertSink[IO, RedshiftType, Byte]].pure[IO]
               case None => IO.raiseError(new RuntimeException("No upsert sink found"))
             }
         }
       rsink map { sink => new Consumer[A] {
         def apply[R <: HList, K <: HList, V <: HList, T <: HList, S <: HList](
             table: String,
-            idColumn: Option[Column[ColumnType.Scalar]],
+            idColumn: Option[Column[RedshiftType]],
             writeMode: WriteMode,
             records: Stream[IO, UpsertEvent[R]])(
             implicit
@@ -541,7 +523,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
             rrow: Mapper.Aux[renderRow.type, V, S],
             ktl: ToList[K, String],
             vtl: ToList[S, String],
-            ttl: ToList[T, ColumnType.Scalar])
+            ttl: ToList[T, RedshiftType])
             : IO[(List[A], List[OffsetKey.Actual[String]])] = {
 
         val createSchema = fr"CREATE SCHEMA IF NOT EXISTS" ++
@@ -571,21 +553,21 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
     }
 
     def append[A](cfg: Json, connectionUri: String, schema: String = "public"): Resource[IO, Consumer[A]] = {
-      val rsink: Resource[IO, ResultSink.AppendSink[IO, ColumnType.Scalar]] =
+      val rsink: Resource[IO, ResultSink.AppendSink[IO, RedshiftType]] =
         DM.destination[IO](cfg, _ => _ => Stream.empty) evalMap {
           case Left(err) =>
             IO.raiseError(new RuntimeException(err.shows))
           case Right(dst) =>
             val optSink = dst.sinks.toList.collectFirst { case c @ ResultSink.AppendSink(_) => c }
             optSink match {
-              case Some(s) => s.asInstanceOf[ResultSink.AppendSink[IO, ColumnType.Scalar]].pure[IO]
+              case Some(s) => s.asInstanceOf[ResultSink.AppendSink[IO, RedshiftType]].pure[IO]
               case None => IO.raiseError(new RuntimeException("No append sink found"))
             }
         }
       rsink map { sink => new Consumer[A] {
         def apply[R <: HList, K <: HList, V <: HList, T <: HList, S <: HList](
             table: String,
-            idColumn: Option[Column[ColumnType.Scalar]],
+            idColumn: Option[Column[RedshiftType]],
             writeMode: WriteMode,
             records: Stream[IO, UpsertEvent[R]])(
             implicit
@@ -596,7 +578,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
             rrow: Mapper.Aux[renderRow.type, V, S],
             ktl: ToList[K, String],
             vtl: ToList[S, String],
-            ttl: ToList[T, ColumnType.Scalar])
+            ttl: ToList[T, RedshiftType])
             : IO[(List[A], List[OffsetKey.Actual[String]])] = {
 
         val createSchema = fr"CREATE SCHEMA IF NOT EXISTS" ++
@@ -642,7 +624,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
     def apply[A]: PartiallyApplied[A] = new PartiallyApplied[A]
 
     final class PartiallyApplied[A] {
-      type MkOption = Column[ColumnType.Scalar] => Option[Column[ColumnType.Scalar]]
+      type MkOption = Column[RedshiftType] => Option[Column[RedshiftType]]
       def apply[R: AsResult](
           f: (MkOption, Consumer[A]) => IO[R])
           : SFragment = {
@@ -666,7 +648,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
     def apply[A]: PartiallyApplied[A] = new PartiallyApplied[A]
 
     final class PartiallyApplied[A] {
-      type MkOption = Column[ColumnType.Scalar] => Option[Column[ColumnType.Scalar]]
+      type MkOption = Column[RedshiftType] => Option[Column[RedshiftType]]
       def apply[R: AsResult](
           f: (MkOption, Consumer[A]) => IO[R])
           : SFragment = {
@@ -685,7 +667,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
   def drainAndSelect[F[_]: Async: ContextShift, R <: HList, K <: HList, V <: HList, T <: HList, S <: HList](
       connectionUri: String,
       table: String,
-      sink: ResultSink.CreateSink[F, ColumnType.Scalar, Byte],
+      sink: ResultSink.CreateSink[F, RedshiftType, Byte],
       records: Stream[F, R],
       schema: String = "public")(
       implicit
@@ -696,7 +678,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       rrow: Mapper.Aux[renderRow.type, V, S],
       ktl: ToList[K, String],
       vtl: ToList[S, String],
-      ttl: ToList[T, ColumnType.Scalar])
+      ttl: ToList[T, RedshiftType])
       : F[List[V]] =
     drainAndSelectAs[F, V](connectionUri, table, sink, records, schema)
 
@@ -708,7 +690,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       def apply[R <: HList, K <: HList, V <: HList, T <: HList, S <: HList](
           connectionUri: String,
           table: String,
-          sink: ResultSink.CreateSink[F, ColumnType.Scalar, Byte],
+          sink: ResultSink.CreateSink[F, RedshiftType, Byte],
           records: Stream[F, R],
           schema: String = "public")(
           implicit
@@ -721,7 +703,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
           rrow: Mapper.Aux[renderRow.type, V, S],
           ktl: ToList[K, String],
           vtl: ToList[S, String],
-          ttl: ToList[T, ColumnType.Scalar])
+          ttl: ToList[T, RedshiftType])
           : F[List[A]] = {
 
         val dst = ResourcePath.root() / ResourceName(table)
@@ -771,7 +753,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       rrow: Mapper.Aux[renderRow.type, V, S],
       ktl: ToList[K, String],
       vtl: ToList[S, String],
-      ttl: ToList[T, ColumnType.Scalar])
+      ttl: ToList[T, RedshiftType])
       : IO[List[V]] =
     randomAlphaNum[IO](6) flatMap { tableSuffix =>
       val table = s"redshift_dest_test${tableSuffix}"
@@ -792,7 +774,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
       rrow: Mapper.Aux[renderRow.type, V, S],
       ktl: ToList[K, String],
       vtl: ToList[S, String],
-      ttl: ToList[T, ColumnType.Scalar])
+      ttl: ToList[T, RedshiftType])
       : IO[MatchResult[List[V]]] =
     loadAndRetrieve(record, records: _*)
       .map(_ must containTheSameElementsAs(record +: records))
