@@ -123,24 +123,24 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
         }
     }
 
-//    "not write without a commit" >> appendAndUpsert[String :: String :: HNil] { (toOpt, consumer) =>
-//      val events =
-//        Stream(
-//          UpsertEvent.Create(List(("x" ->> "foo") :: ("y" ->> "bar") :: HNil)),
-//          UpsertEvent.Create(List(("x" ->> "quz") :: ("y" ->> "corge") :: HNil)),
-//          UpsertEvent.Commit("commit1"),
-//          UpsertEvent.Create(List(("x" ->> "baz") :: ("y" ->> "qux") :: HNil)))
-//
-//      for {
-//        tbl <- freshTableName
-//        (values, offsets) <- consumer(tbl, toOpt(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events)
-//        } yield {
-//          values must_== List(
-//            "foo" :: "bar" :: HNil,
-//            "quz" :: "corge" :: HNil)
-//          offsets must_== List(OffsetKey.Actual.string("commit1"))
-//        }
-//    }
+    "not write without a commit" >> appendAndUpsert[String :: String :: HNil] { (toOpt, consumer) =>
+      val events =
+        Stream(
+          UpsertEvent.Create(List(("x" ->> "foo") :: ("y" ->> "bar") :: HNil)),
+          UpsertEvent.Create(List(("x" ->> "quz") :: ("y" ->> "corge") :: HNil)),
+          UpsertEvent.Commit("commit1"),
+          UpsertEvent.Create(List(("x" ->> "baz") :: ("y" ->> "qux") :: HNil)))
+
+      for {
+        tbl <- freshTableName
+        (values, offsets) <- consumer(tbl, toOpt(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events)
+        } yield {
+          values must_== List(
+            "foo" :: "bar" :: HNil,
+            "quz" :: "corge" :: HNil)
+          offsets must_== List(OffsetKey.Actual.string("commit1"))
+        }
+    }
 
     "commit twice in a row" >> appendAndUpsert[String :: String :: HNil] { (toOpt, consumer) =>
       val events =
