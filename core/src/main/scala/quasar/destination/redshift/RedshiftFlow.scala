@@ -40,7 +40,7 @@ import cats.implicits._
 import doobie._
 import doobie.implicits._
 
-import fs2.{compression, Pipe, Stream}
+import fs2.{compression, Stream}
 
 import org.slf4s.Logging
 
@@ -58,6 +58,21 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
     writeModeRef: Ref[F, WriteMode],
     args: Flow.Args)
     extends Flow[F] with Logging {
+
+  type Stage = BlobPath
+
+  def stage(bytes: Stream[F, Byte]): Resource[F, Stage] = {
+    val compressed = bytes.through(compression.gzip(bufferSize = 1024 * 32))
+
+    val make = for {
+      suffix <- Sync[F].delay(UUID.randomUUID().toString)
+      freshName = s"reform-$suffix.gz"
+      uploadPath = BlobPath(List(PathElem(freshName)))
+      _ <- putService((uploadPath, compressed))
+    } yield uploadPath
+
+    Resource.make(make)(deleteService(_).void)
+  }
 
   def delete(ids: IdBatch): Stream[F, Unit] = args.idColumn.traverse_ { idCol =>
     val strs: Array[String] = ids match {
@@ -108,28 +123,23 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
       })
   }
 
-  def ingest: Pipe[F, Byte, Unit] = { inp =>
-    Stream.resource {
-      val colFragments = args.columns map mkColumn
-      for {
-        uploaded <- stageFile(inp)
-        writeMode <- Resource.liftF(writeModeRef.get)
-        _ <- writeMode match {
-          case WriteMode.Replace => Resource.liftF {
-            createNewTable(colFragments).transact(xa) >>
-            writeModeRef.set(WriteMode.Append)
-          }
-          case WriteMode.Append => ().pure[Resource[F, *]]
-        }
-        _ <- Resource.liftF {
-          copyInto(uploaded, config.uploadBucket.bucket, args.columns, config.authorization)
-        }
-      } yield ()
-    }
+  def ingest(uploaded: Stage): F[Unit] = {
+    val colFragments = args.columns map mkColumn
+    for {
+      writeMode <- writeModeRef.get
+      _ <- writeMode match {
+        case WriteMode.Replace =>
+          createNewTable(colFragments).transact(xa) >>
+          writeModeRef.set(WriteMode.Append)
+        case WriteMode.Append =>
+          ().pure[F]
+      }
+      _ <- copyInto(uploaded, config.uploadBucket.bucket, args.columns, config.authorization)
+    } yield ()
   }
 
   private def copyInto(
-      blob: BlobPath,
+      blob: Stage,
       bucket: Bucket,
       cols: NonEmptyList[Column[_]],
       authorization: Authorization): F[Unit] = {
@@ -196,18 +206,6 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
     fragment.update.run.void
   }
 
-  private def stageFile(bytes: Stream[F, Byte]): Resource[F, BlobPath] = {
-    val compressed = bytes.through(compression.gzip(bufferSize = 1024 * 32))
-
-    val make = for {
-      suffix <- Sync[F].delay(UUID.randomUUID().toString)
-      freshName = s"reform-$suffix.gz"
-      uploadPath = BlobPath(List(PathElem(freshName)))
-      _ <- putService((uploadPath, compressed))
-    } yield uploadPath
-
-    Resource.make(make)(deleteService(_).void)
-  }
 
   private def mkColumn(c: Column[RedshiftType]): Fragment =
     Fragment.const(RedshiftFlow.escape(c.name)) ++ c.tpe.asSql

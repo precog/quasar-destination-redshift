@@ -25,8 +25,10 @@ import quasar.connector._
 import quasar.connector.destination.{ResultSink, WriteMode}, ResultSink.{UpsertSink, AppendSink}
 import quasar.connector.render.RenderConfig
 
+import cats.Applicative
 import cats.data._
-import cats.effect.{Concurrent, Resource}
+import cats.effect.{Concurrent, Resource, Sync}
+import cats.effect.concurrent.Ref
 import cats.implicits._
 
 import fs2.{Stream, Pipe, Chunk}
@@ -34,7 +36,9 @@ import fs2.{Stream, Pipe, Chunk}
 import skolems.∀
 
 private[redshift] trait Flow[F[_]] {
-  def ingest: Pipe[F, Byte, Unit]
+  type Stage
+  def stage(inp: Stream[F, Byte]): Resource[F, Stage]
+  def ingest(s: Stage): F[Unit]
   def delete(ids: IdBatch): Stream[F, Unit]
 }
 
@@ -83,13 +87,16 @@ object Flow {
     def flowSinks(implicit F: Concurrent[F]): NonEmptyList[ResultSink[F, RedshiftType]] =
       NonEmptyList.of(ResultSink.create(create), ResultSink.upsert(upsert), ResultSink.append(append))
 
-    private def create(path: ResourcePath, cols: NonEmptyList[FlowColumn])
+    private def create(path: ResourcePath, cols: NonEmptyList[FlowColumn])(implicit F: Applicative[F])
         : (RenderConfig[Byte], Pipe[F, Byte, Unit]) = {
       val args = Args.ofCreate(path, cols)
-      (render, in => for {
-        flow <- Stream.resource(flowR(args))
-        _ <- Stream.emit(Event.Create(in)).through(ingest[Unit](flow))
-      } yield ())
+      (render, in => Stream.resource {
+        for {
+          flow <- flowR(args)
+          s <- flow.stage(in)
+          _ <- Resource.liftF(flow.ingest(s))
+        } yield ()
+      })
     }
 
     private def upsert(upsertArgs: UpsertSink.Args[RedshiftType])(implicit F: Concurrent[F])
@@ -110,23 +117,37 @@ object Flow {
         : Pipe[F, DataEvent[Byte, OffsetKey.Actual[A]], OffsetKey.Actual[A]] = { events =>
       for {
         flow <- Stream.resource(flowR(args))
+        staged <- Stream.eval(Ref.of[F, List[flow.Stage]](List()))
+        finalizers <- Stream.eval(Ref.of[F, F[Unit]](().pure[F]))
         offset <- events
           .through(Event.fromDataEvent[F, OffsetKey.Actual[A]])
-          .through(ingest[OffsetKey.Actual[A]](flow))
+          .through(ingest[OffsetKey.Actual[A]](flow)(staged, finalizers))
       } yield offset
     }
 
-    private def ingest[A](flow: Flow[F]): Pipe[F, Event[F, A], A] = { events =>
+    private def ingest[A](flow: Flow[F])(staged: Ref[F, List[flow.Stage]], fin: Ref[F, F[Unit]])(implicit F: Sync[F])
+        : Pipe[F, Event[F, A], A] = { events =>
       def handleEvent: Pipe[F, Event[F, A], Option[A]] = _ flatMap {
-        case Event.Create(stream) =>
-          flow.ingest(stream).mapChunks(_ => Chunk(none[A]))
+        case Event.Create(stream) => Stream.eval {
+          for {
+            (s, f) <- flow.stage(stream).allocated
+            _ <- staged.update(s :: _)
+            _ <- fin.update(_ >> f)
+          } yield none[A]
+        }
         case Event.Delete(ids) =>
           flow.delete(ids).mapChunks(_ => Chunk(none[A]))
-        case Event.Commit(offset) =>
-          Stream.emit(offset.some)
+        case Event.Commit(offset) => Stream.eval {
+          for {
+            ss <- staged.getAndSet(List())
+            _ <- ss.traverse_(flow.ingest)
+          } yield offset.some
+        }
       }
 
-      events.through(handleEvent).unNone
+      events.through(handleEvent).unNone.onFinalize {
+        fin.get.flatten
+      }
     }
   }
 }
