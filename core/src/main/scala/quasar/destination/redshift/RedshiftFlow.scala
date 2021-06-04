@@ -61,7 +61,7 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
 
   type Stage = BlobPath
 
-  def stage(bytes: Stream[F, Byte]): Resource[F, BlobPath] = {
+  def stage(bytes: Stream[F, Byte]): Resource[F, Stage] = {
     val compressed = bytes.through(compression.gzip(bufferSize = 1024 * 32))
 
     val make = for {
@@ -123,7 +123,7 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
       })
   }
 
-  def ingest(uploaded: BlobPath): F[Unit] = {
+  def ingest(uploaded: Stage): F[Unit] = {
     val colFragments = args.columns map mkColumn
     for {
       writeMode <- writeModeRef.get
@@ -139,7 +139,7 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
   }
 
   private def copyInto(
-      blob: BlobPath,
+      blob: Stage,
       bucket: Bucket,
       cols: NonEmptyList[Column[_]],
       authorization: Authorization): F[Unit] = {
