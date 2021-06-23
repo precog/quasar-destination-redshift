@@ -94,7 +94,7 @@ object Flow {
         for {
           flow <- flowR(args)
           s <- flow.stage(in)
-          _ <- Resource.liftF(flow.ingest(s))
+          _ <- Resource.eval(flow.ingest(s))
         } yield ()
       })
     }

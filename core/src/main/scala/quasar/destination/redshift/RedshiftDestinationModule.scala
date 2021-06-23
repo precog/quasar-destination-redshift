@@ -89,7 +89,7 @@ object RedshiftDestinationModule extends DestinationModule {
       jdbcUri = cfg.connectionUri.toString
 
       xa <- EitherT.right(for {
-        poolSuffix <- Resource.liftF(Sync[F].delay(Random.alphanumeric.take(5).mkString))
+        poolSuffix <- Resource.eval(Sync[F].defer(Random.alphanumeric.take(5).mkString))
         connectPool <- boundedPool[F](s"redshift-dest-connect-$poolSuffix", PoolSize)
         transactPool <- unboundedPool[F](s"redshift-dest-transact-$poolSuffix")
         transactor <- HikariTransactor.newHikariTransactor[F](
@@ -106,8 +106,8 @@ object RedshiftDestinationModule extends DestinationModule {
       client <- EitherT.right[InitErr][Resource[F, ?], S3AsyncClient](
         s3Client[F](uploadCfg.accessKey, uploadCfg.secretKey, uploadCfg.region))
 
-      _ <- EitherT(Resource.liftF(validDatabaseConnection[F](xa, config)))
-      _ <- EitherT(Resource.liftF(validBucket[F](client, config, uploadCfg.bucket)))
+      _ <- EitherT(Resource.eval(validDatabaseConnection[F](xa, config)))
+      _ <- EitherT(Resource.eval(validBucket[F](client, config, uploadCfg.bucket)))
 
       deleteService = S3DeleteService(client, uploadCfg.bucket)
 
@@ -163,17 +163,17 @@ object RedshiftDestinationModule extends DestinationModule {
 
   private def boundedPool[F[_]: Sync](name: String, threadCount: Int): Resource[F, ExecutionContext] =
     Resource.make(
-      Sync[F].delay(
+      Sync[F].defer(
         Executors.newFixedThreadPool(
           threadCount,
-          NamedDaemonThreadFactory(name))))(es => Sync[F].delay(es.shutdown()))
+          NamedDaemonThreadFactory(name))))(es => Sync[F].defer(es.shutdown()))
       .map(ExecutionContext.fromExecutor(_))
 
   private def unboundedPool[F[_]: Sync](name: String): Resource[F, ExecutionContext] =
     Resource.make(
-      Sync[F].delay(
+      Sync[F].defer(
         Executors.newCachedThreadPool(
-          NamedDaemonThreadFactory(name))))(es => Sync[F].delay(es.shutdown()))
+          NamedDaemonThreadFactory(name))))(es => Sync[F].defer(es.shutdown()))
       .map(ExecutionContext.fromExecutor(_))
 
   private def s3Client[F[_]: Concurrent](
@@ -182,7 +182,7 @@ object RedshiftDestinationModule extends DestinationModule {
     region: Region)
       : Resource[F, S3AsyncClient] = {
     val client =
-      Concurrent[F].delay(
+      Concurrent[F].defer(
         S3AsyncClient.builder
           .credentialsProvider(
             StaticCredentialsProvider.create(
