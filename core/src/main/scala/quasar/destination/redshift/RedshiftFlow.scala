@@ -65,7 +65,7 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
     val compressed = bytes.through(compression.gzip(bufferSize = 1024 * 32))
 
     val make = for {
-      suffix <- Sync[F].defer(UUID.randomUUID().toString)
+      suffix <- Sync[F].delay(UUID.randomUUID().toString)
       freshName = s"reform-$suffix.gz"
       uploadPath = BlobPath(List(PathElem(freshName)))
       _ <- putService((uploadPath, compressed))
@@ -211,7 +211,7 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
     Fragment.const(RedshiftFlow.escape(c.name)) ++ c.tpe.asSql
 
   private def debug[G[_]: Sync](msg: String): G[Unit] =
-    Sync[G].defer(log.debug(msg))
+    Sync[G].delay(log.debug(msg))
 }
 
 object RedshiftFlow {

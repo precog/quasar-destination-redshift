@@ -412,7 +412,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
     RedshiftFlow.escape(s)
 
   def randomAlphaNum[F[_]: Sync](size: Int): F[String] =
-    Sync[F].defer(Random.alphanumeric.take(size).mkString)
+    Sync[F].delay(Random.alphanumeric.take(size).mkString)
 
   val freshTableName: IO[String] =
     randomAlphaNum[IO](6).map(suffix => s"redshift_test${suffix}")
