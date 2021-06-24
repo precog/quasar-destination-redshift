@@ -89,7 +89,7 @@ object RedshiftDestinationModule extends DestinationModule {
       jdbcUri = cfg.connectionUri.toString
 
       xa <- EitherT.right(for {
-        poolSuffix <- Resource.liftF(Sync[F].delay(Random.alphanumeric.take(5).mkString))
+        poolSuffix <- Resource.eval(Sync[F].delay(Random.alphanumeric.take(5).mkString))
         connectPool <- boundedPool[F](s"redshift-dest-connect-$poolSuffix", PoolSize)
         transactPool <- unboundedPool[F](s"redshift-dest-transact-$poolSuffix")
         transactor <- HikariTransactor.newHikariTransactor[F](
@@ -106,8 +106,8 @@ object RedshiftDestinationModule extends DestinationModule {
       client <- EitherT.right[InitErr][Resource[F, ?], S3AsyncClient](
         s3Client[F](uploadCfg.accessKey, uploadCfg.secretKey, uploadCfg.region))
 
-      _ <- EitherT(Resource.liftF(validDatabaseConnection[F](xa, config)))
-      _ <- EitherT(Resource.liftF(validBucket[F](client, config, uploadCfg.bucket)))
+      _ <- EitherT(Resource.eval(validDatabaseConnection[F](xa, config)))
+      _ <- EitherT(Resource.eval(validBucket[F](client, config, uploadCfg.bucket)))
 
       deleteService = S3DeleteService(client, uploadCfg.bucket)
 

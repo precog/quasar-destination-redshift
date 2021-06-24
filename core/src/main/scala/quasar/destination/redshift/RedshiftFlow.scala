@@ -225,8 +225,8 @@ object RedshiftFlow {
       args: Flow.Args)
       : Resource[F, Flow[F]] = for {
     xa <- rxa
-    tableName <- Resource.liftF(ensureValidTableName[F](args.path))
-    writeModeRef <- Resource.liftF(Ref.of[F, WriteMode](args.writeMode))
+    tableName <- Resource.eval(ensureValidTableName[F](args.path))
+    writeModeRef <- Resource.eval(Ref.of[F, WriteMode](args.writeMode))
   } yield {
     val nameFragment = Fragment.const(tableName)
 
