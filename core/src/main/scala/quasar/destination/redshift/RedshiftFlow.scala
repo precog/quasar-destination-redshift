@@ -75,11 +75,12 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
   }
 
   def delete(ids: IdBatch): Stream[F, Unit] = args.idColumn.traverse_ { idCol =>
+
     val strs: Array[String] = ids match {
-      case IdBatch.Strings(values, _) => values.map(x => "'" + x.replace("'", "''") + "'")
-      case IdBatch.Longs(values, _) => values.map(_.toString)
-      case IdBatch.Doubles(values, _) => values.map(_.toString)
-      case IdBatch.BigDecimals(values, _) => values.map(_.toString)
+      case IdBatch.Strings(values, size) => values.take(size).map(x => "'" + x.replace("'", "''") + "'")
+      case IdBatch.Longs(values, size) => values.take(size).map(_.toString)
+      case IdBatch.Doubles(values, size) => values.take(size).map(_.toString)
+      case IdBatch.BigDecimals(values, size) => values.take(size).map(_.toString)
     }
 
     // The limit is 16Mb, we split on 4Mb, no need to count `DELETE FROM`
