@@ -247,6 +247,30 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
         }
       }
 
+    "handles id batches with nulls without failing" >>
+      upsertOnly[String :: String :: HNil] { consumer =>
+        val events =
+          Stream(
+            UpsertEvent.Create(
+              List(
+                ("x" ->> "foo") :: ("y" ->> "bar") :: HNil,
+                ("x" ->> "baz") :: ("y" ->> "qux") :: HNil)),
+            UpsertEvent.Commit("commit1"),
+            UpsertEvent.Delete(Ids.ArrayIds(Array("baz", null), 1)),
+            UpsertEvent.Commit("commit2"))
+
+        for {
+          tbl <- freshTableName
+          (values, offsets) <- consumer(tbl, Some(Column("x", RedshiftType.VARCHAR(512))), WriteMode.Replace, events)
+        } yield {
+          values must_== List("foo" :: "bar" :: HNil)
+
+          offsets must_== List(
+            OffsetKey.Actual.string("commit1"),
+            OffsetKey.Actual.string("commit2"))
+        }
+      }
+
     "creates table and then appends" >> appendAndUpsert[String :: String :: HNil] { (toOpt, consumer) =>
       val events1 =
         Stream(
@@ -397,7 +421,7 @@ object RedshiftDestinationSpec extends EffectfulQSpec[IO] with CsvSupport {
 
   def testsEnabled: Boolean =
     List(TestConnectionUrl, TestBucket, TestAccessKey, TestSecretKey, TestRegion, User, Password)
-      .forall(x => x =!= "")
+      .forall(_ =!= "")
 
   implicit val CS: ContextShift[IO] = IO.contextShift(global)
 

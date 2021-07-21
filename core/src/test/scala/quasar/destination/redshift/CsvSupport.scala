@@ -67,6 +67,7 @@ trait CsvSupport {
   object Ids {
     case class StringIds(ids: List[String]) extends Ids
     case class LongIds(ids: List[Long]) extends Ids
+    case class ArrayIds(ids: Array[String], size: Int) extends Ids
   }
 
   object UpsertEvent {
@@ -221,6 +222,9 @@ trait CsvSupport {
       case UpsertEvent.Delete(Ids.LongIds(is)) =>
         Stream(
           DataEvent.Delete(IdBatch.Longs(is.toArray, is.length)))
+      case UpsertEvent.Delete(Ids.ArrayIds(arr, size)) =>
+        Stream(
+          DataEvent.Delete(IdBatch.Strings(arr, size)))
     }
 
     columnsOf(events, renderRow, Some(idColumn)) flatMap { cols =>
