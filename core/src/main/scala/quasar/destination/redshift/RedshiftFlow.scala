@@ -184,16 +184,10 @@ final class RedshiftFlow[F[_]: ConcurrentEffect: ContextShift: Timer: MonadResou
     inp.replace("'", "")
 
   private def createNewTable(columns: NonEmptyList[Fragment]): ConnectionIO[Unit] = {
-    createSchemaIfNotExists >>
     dropTableIfExists >>
     createTable(columns)
   }
 
-  private def createSchemaIfNotExists: ConnectionIO[Unit] = schemaFragment traverse_ { (sfr: Fragment) =>
-    val fragment = fr"CREATE SCHEMA IF NOT EXISTS" ++ sfr
-    debug[ConnectionIO](s"CREATE SCHEMA QUERY: ${fragment.update.sql}") >>
-    fragment.update.run.void
-  }
   private def dropTableIfExists: ConnectionIO[Unit] = {
     val fragment = fr"DROP TABLE IF EXISTS" ++ tblFragment
     debug[ConnectionIO](s"DROP QUERY: ${fragment.update.sql}") >>
