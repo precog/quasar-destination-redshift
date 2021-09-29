@@ -18,6 +18,7 @@ val SpecsVersion = "4.8.3"
 
 val RedshiftRepository = "redshift" at "https://s3.amazonaws.com/redshift-maven-repository/release"
 
+
 // Include to also publish a project's tests
 lazy val publishTestsSettings = Seq(
   Test / packageBin / publishArtifact := true)
